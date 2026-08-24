@@ -1,0 +1,219 @@
+import {
+  applyGroupEffects,
+  DEFAULT_LAYER_STYLE,
+  type GeoLibreLayer,
+  type LayerGroup,
+} from "@geolibre/core";
+import type * as maplibregl from "maplibre-gl";
+import { RasterControl, type RasterLayerState } from "maplibre-gl-raster";
+import { getRasterAsset, putRasterAsset } from "./assets";
+
+export const PROJECT_RASTER_KIND = "project-raster";
+
+/** Same rasterState fields GeoLibre's style panel pushes to the control. */
+export function pickRasterState(value: unknown): Partial<RasterLayerState> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const state: Partial<RasterLayerState> = {};
+  if (raw.mode === "single" || raw.mode === "rgb" || raw.mode === "index") state.mode = raw.mode;
+  if (typeof raw.index === "string" && raw.index) state.index = raw.index;
+  if (
+    Array.isArray(raw.bands) &&
+    raw.bands.length > 0 &&
+    raw.bands.every((band) => typeof band === "number" && Number.isInteger(band) && band > 0)
+  ) {
+    state.bands = raw.bands as number[];
+  }
+  if (
+    raw.rescale === null ||
+    (Array.isArray(raw.rescale) &&
+      raw.rescale.length > 0 &&
+      raw.rescale.every(
+        (range) =>
+          Array.isArray(range) &&
+          range.length === 2 &&
+          range.every((n) => typeof n === "number" && Number.isFinite(n)),
+      ))
+  ) {
+    state.rescale = raw.rescale as [number, number][] | null;
+  }
+  if (typeof raw.colormap === "string" && raw.colormap) state.colormap = raw.colormap;
+  if (typeof raw.reversed === "boolean") state.reversed = raw.reversed;
+  if (
+    raw.nodata === "off" ||
+    raw.nodata === "auto" ||
+    (typeof raw.nodata === "number" && Number.isFinite(raw.nodata))
+  ) {
+    state.nodata = raw.nodata;
+  }
+  if (typeof raw.gamma === "number" && Number.isFinite(raw.gamma) && raw.gamma > 0) {
+    state.gamma = raw.gamma;
+  }
+  if (raw.stretch === "linear" || raw.stretch === "log" || raw.stretch === "sqrt") {
+    state.stretch = raw.stretch;
+  }
+  return state;
+}
+
+function rasterMetadata(layer: GeoLibreLayer): Partial<RasterLayerState> {
+  return pickRasterState(layer.metadata.rasterState);
+}
+
+export function isProjectRaster(layer: GeoLibreLayer): boolean {
+  return layer.type === "cog" && layer.metadata.sourceKind === PROJECT_RASTER_KIND;
+}
+
+export function rasterAssetId(layer: GeoLibreLayer): string | null {
+  return typeof layer.source.assetId === "string" ? layer.source.assetId : null;
+}
+
+export function createRemoteRasterLayer(url: string): GeoLibreLayer {
+  return {
+    id: crypto.randomUUID(),
+    name: url.split("/").pop()?.split("?")[0] || "Remote COG",
+    type: "cog",
+    source: { type: "raster", url },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: { sourceKind: PROJECT_RASTER_KIND, rasterState: { colormap: "viridis" } },
+  };
+}
+
+export async function createLocalRasterLayer(file: File): Promise<GeoLibreLayer> {
+  const id = crypto.randomUUID();
+  await putRasterAsset(id, file);
+  return {
+    id,
+    name: file.name,
+    type: "cog",
+    source: { type: "raster", assetId: id },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: {
+      sourceKind: PROJECT_RASTER_KIND,
+      localFileName: file.name,
+      rasterState: { colormap: "viridis" },
+    },
+  };
+}
+
+async function sourceFor(layer: GeoLibreLayer): Promise<File | string> {
+  if (typeof layer.source.url === "string" && layer.source.url) return layer.source.url;
+  const assetId = rasterAssetId(layer);
+  const file = assetId ? await getRasterAsset(assetId) : null;
+  if (!file) throw new Error(`本地栅格资产不可用：${layer.name}`);
+  return file;
+}
+
+function sourceKey(layer: GeoLibreLayer): string {
+  return typeof layer.source.url === "string"
+    ? `url:${layer.source.url}`
+    : `asset:${rasterAssetId(layer) ?? ""}`;
+}
+
+export interface RasterAdapter {
+  sync(layers: GeoLibreLayer[], groups: LayerGroup[], opts?: { zoomTo?: boolean }): void;
+  zoomTo(id: string): void;
+  selectRaster(id: string | null): void;
+  setInspect(enabled: boolean): void;
+  collapse(): void;
+  collapsed(): boolean;
+  dispose(): void;
+}
+
+export function createRasterAdapter(
+  map: maplibregl.Map,
+  onError: (message: string) => void,
+): RasterAdapter {
+  const control = new RasterControl({ collapsed: true });
+  map.addControl(control, "top-right");
+  const loading = new Map<string, string>();
+  const loadedKeys = new Map<string, string>();
+  let desired = new Map<string, GeoLibreLayer>();
+  let disposed = false;
+
+  const applyState = (layer: GeoLibreLayer) => {
+    if (!control.getRaster(layer.id)) return;
+    control.setRasterState(layer.id, {
+      ...rasterMetadata(layer),
+      opacity: layer.opacity,
+      visible: layer.visible,
+    });
+  };
+
+  const ensure = async (layer: GeoLibreLayer, zoomTo: boolean) => {
+    const key = sourceKey(layer);
+    if (control.getRaster(layer.id)) {
+      if (loadedKeys.get(layer.id) === key) return applyState(layer);
+      control.removeRaster(layer.id);
+      loadedKeys.delete(layer.id);
+    }
+    if (loading.get(layer.id) === key) return;
+    loading.set(layer.id, key);
+    try {
+      await control.addRaster(await sourceFor(layer), {
+        id: layer.id,
+        name: layer.name,
+        zoomTo: zoomTo && layer.metadata.zoomTo === true,
+        state: {
+          ...rasterMetadata(layer),
+          opacity: layer.opacity,
+          visible: layer.visible,
+        },
+      });
+      if (disposed || sourceKey(desired.get(layer.id) ?? layer) !== key || !desired.has(layer.id)) {
+        control.removeRaster(layer.id);
+        return;
+      }
+      loadedKeys.set(layer.id, key);
+      applyState(desired.get(layer.id)!);
+      [...desired.keys()].forEach((id, index) => {
+        if (control.getRaster(id)) control.reorderRaster(id, index);
+      });
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (loading.get(layer.id) === key) loading.delete(layer.id);
+    }
+  };
+
+  return {
+    sync(layers, groups, opts) {
+      const zoomTo = opts?.zoomTo !== false;
+      const rasters = applyGroupEffects(layers, groups).filter(isProjectRaster);
+      desired = new Map(rasters.map((layer) => [layer.id, layer]));
+      for (const raster of control.getRasters()) {
+        if (!desired.has(raster.id)) {
+          control.removeRaster(raster.id);
+          loadedKeys.delete(raster.id);
+        }
+      }
+      for (const layer of rasters) void ensure(layer, zoomTo);
+      rasters.forEach((layer, index) => {
+        if (control.getRaster(layer.id)) control.reorderRaster(layer.id, index);
+      });
+    },
+    zoomTo(id) {
+      control.zoomToRaster(id);
+    },
+    selectRaster(id) {
+      control.selectRaster(id);
+    },
+    setInspect(enabled) {
+      control.setInspect(enabled);
+    },
+    collapse() {
+      control.collapse();
+    },
+    collapsed() {
+      return control.getState().collapsed;
+    },
+    dispose() {
+      disposed = true;
+      desired.clear();
+      if (map.hasControl(control)) map.removeControl(control);
+    },
+  };
+}

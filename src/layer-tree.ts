@@ -1,0 +1,253 @@
+import type { GeoLibreLayer, LayerGroup } from "@geolibre/core";
+import { button } from "./dom";
+import { dropInsertIndex } from "./layer-order";
+import { projectStore } from "./project-store";
+import { openLayerStyle, type LayerUiActions } from "./style-editor";
+
+let host: HTMLDivElement;
+let actions: LayerUiActions;
+
+const contextMenu = document.createElement("div");
+contextMenu.className = "context-menu";
+contextMenu.role = "menu";
+contextMenu.hidden = true;
+document.body.append(contextMenu);
+
+export function bindLayerTree(el: HTMLDivElement, next: LayerUiActions): void {
+  host = el;
+  actions = next;
+}
+
+export function closeContextMenu(): void {
+  contextMenu.hidden = true;
+}
+
+export function isContextMenuOpen(): boolean {
+  return !contextMenu.hidden;
+}
+
+export function contextMenuButton(label: string, action: () => void, danger = false): HTMLButtonElement {
+  const item = button(label, () => {
+    closeContextMenu();
+    action();
+  });
+  item.role = "menuitem";
+  if (danger) item.className = "danger";
+  return item;
+}
+
+export function showContextMenu(event: MouseEvent, items: HTMLButtonElement[]): void {
+  event.preventDefault();
+  placeContextMenu(items, event.clientX, event.clientY, true);
+}
+
+export function placeContextMenu(
+  items: HTMLButtonElement[],
+  left: number,
+  top: number,
+  clamp = false,
+): void {
+  contextMenu.replaceChildren(...items);
+  contextMenu.hidden = false;
+  contextMenu.style.left = clamp
+    ? `${Math.min(left, innerWidth - contextMenu.offsetWidth - 8)}px`
+    : `${left}px`;
+  contextMenu.style.top = clamp
+    ? `${Math.min(top, innerHeight - contextMenu.offsetHeight - 8)}px`
+    : `${top}px`;
+}
+
+function openLayerContextMenu(layer: GeoLibreLayer, event: MouseEvent): void {
+  const { project } = projectStore.getState();
+  const index = project.layers.findIndex((candidate) => candidate.id === layer.id);
+  projectStore.getState().selectLayer(layer.id);
+  showContextMenu(event, [
+    contextMenuButton("缩放到图层", () => actions.fitLayer(layer)),
+    contextMenuButton("打开样式", () => openLayerStyle(layer.id)),
+    contextMenuButton(layer.visible ? "隐藏图层" : "显示图层", () =>
+      projectStore.getState().updateLayer(layer.id, { visible: !layer.visible }),
+    ),
+    contextMenuButton("上移", () => projectStore.getState().moveLayer(layer.id, index + 1)),
+    contextMenuButton("下移", () => projectStore.getState().moveLayer(layer.id, index - 1)),
+    contextMenuButton("移除图层", () => actions.removeLayer(layer), true),
+  ]);
+}
+
+function openGroupContextMenu(group: LayerGroup, event: MouseEvent): void {
+  showContextMenu(event, [
+    contextMenuButton(group.collapsed ? "展开" : "折叠", () =>
+      projectStore.getState().updateGroup(group.id, { collapsed: !group.collapsed }),
+    ),
+    contextMenuButton("移除组", () => projectStore.getState().removeGroup(group.id), true),
+  ]);
+}
+
+document.addEventListener("click", closeContextMenu);
+window.addEventListener("blur", closeContextMenu);
+
+function legendKind(layer: GeoLibreLayer): "point" | "line" | "poly" | "raster" {
+  if (layer.type !== "geojson") return "raster";
+  const type = layer.geojson?.features[0]?.geometry?.type ?? "";
+  if (type.includes("Point")) return "point";
+  if (type.includes("Line")) return "line";
+  return "poly";
+}
+
+function createLegend(layer: GeoLibreLayer): HTMLElement {
+  const kind = legendKind(layer);
+  if (kind === "raster") {
+    const icon = document.createElement("img");
+    icon.className = "legend-icon";
+    icon.src = "icons/raster.svg";
+    icon.alt = "";
+    return icon;
+  }
+  const mark = document.createElement("span");
+  mark.className = `legend-${kind}`;
+  mark.style.setProperty("--fill", layer.style.fillColor);
+  mark.style.setProperty("--stroke", layer.style.strokeColor);
+  return mark;
+}
+
+function treeCheckbox(
+  checked: boolean,
+  onChange: (checked: boolean) => void,
+): HTMLInputElement {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = checked;
+  box.addEventListener("click", (event) => event.stopPropagation());
+  box.addEventListener("change", () => onChange(box.checked));
+  return box;
+}
+
+function dropLayerOn(sourceId: string, target: GeoLibreLayer, aboveInUi: boolean): void {
+  const store = projectStore.getState();
+  const source = store.project.layers.find((layer) => layer.id === sourceId);
+  if (!source || source.id === target.id) return;
+  if (source.groupId !== target.groupId) store.moveLayerToGroup(sourceId, target.groupId);
+  const index = dropInsertIndex(
+    projectStore.getState().project.layers.map((layer) => layer.id),
+    sourceId,
+    target.id,
+    aboveInUi,
+  );
+  if (index !== null) projectStore.getState().moveLayer(sourceId, index);
+}
+
+function bindLayerDrag(row: HTMLElement, layer: GeoLibreLayer): void {
+  const selected = projectStore.getState().selectedLayerId === layer.id;
+  row.draggable = selected;
+  row.addEventListener("dragstart", (event) => {
+    if (projectStore.getState().selectedLayerId !== layer.id) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer?.setData("text/layer-id", layer.id);
+    row.classList.add("dragging");
+  });
+  row.addEventListener("dragend", () => {
+    row.classList.remove("dragging", "drop-above", "drop-below");
+  });
+  row.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const above = event.offsetY < row.clientHeight / 2;
+    row.classList.toggle("drop-above", above);
+    row.classList.toggle("drop-below", !above);
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-above", "drop-below"));
+  row.addEventListener("drop", (event) => {
+    event.preventDefault();
+    row.classList.remove("drop-above", "drop-below");
+    const sourceId = event.dataTransfer?.getData("text/layer-id");
+    if (sourceId) dropLayerOn(sourceId, layer, event.offsetY < row.clientHeight / 2);
+  });
+}
+
+function treeGutter(child?: HTMLElement): HTMLSpanElement {
+  const slot = document.createElement("span");
+  slot.className = "tree-gutter";
+  if (child) slot.append(child);
+  return slot;
+}
+
+function createLayerRow(layer: GeoLibreLayer, depth = 0): HTMLDivElement {
+  const { selectedLayerId } = projectStore.getState();
+  const row = document.createElement("div");
+  row.className = `tree-row${layer.id === selectedLayerId ? " selected" : ""}`;
+  if (depth) row.style.paddingLeft = `${4 + depth * 14}px`;
+  row.addEventListener("click", () => projectStore.getState().selectLayer(layer.id));
+  row.addEventListener("dblclick", () => openLayerStyle(layer.id));
+  row.addEventListener("contextmenu", (event) => openLayerContextMenu(layer, event));
+  bindLayerDrag(row, layer);
+
+  const name = document.createElement("span");
+  name.className = "grow";
+  name.textContent = layer.name;
+  name.title = layer.name;
+  row.append(
+    treeGutter(),
+    treeCheckbox(layer.visible, (checked) =>
+      projectStore.getState().updateLayer(layer.id, { visible: checked }),
+    ),
+    createLegend(layer),
+    name,
+  );
+  return row;
+}
+
+export function renderLayers(): void {
+  const { project } = projectStore.getState();
+  const layers = [...project.layers].reverse();
+  const groups = new Map((project.layerGroups ?? []).map((group) => [group.id, group]));
+  const renderedGroups = new Set<string>();
+  host.replaceChildren();
+
+  const appendGroup = (group: LayerGroup) => {
+    if (renderedGroups.has(group.id)) return;
+    renderedGroups.add(group.id);
+    const children = layers.filter((layer) => layer.groupId === group.id);
+    const row = document.createElement("div");
+    row.className = "tree-row group-row";
+    row.addEventListener("contextmenu", (event) => openGroupContextMenu(group, event));
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tree-toggle";
+    toggle.textContent = group.collapsed ? "▸" : "▾";
+    toggle.title = group.collapsed ? "展开" : "折叠";
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      projectStore.getState().updateGroup(group.id, { collapsed: !group.collapsed });
+    });
+
+    const folder = document.createElement("img");
+    folder.className = "legend-icon";
+    folder.src = "icons/folder.svg";
+    folder.alt = "";
+
+    const name = document.createElement("span");
+    name.className = "grow";
+    name.textContent = group.name;
+    name.title = group.name;
+    row.append(
+      treeGutter(toggle),
+      treeCheckbox(group.visible, (checked) =>
+        projectStore.getState().updateGroup(group.id, { visible: checked }),
+      ),
+      folder,
+      name,
+    );
+    host.append(row);
+    if (!group.collapsed) {
+      for (const layer of children) host.append(createLayerRow(layer, 1));
+    }
+  };
+
+  for (const layer of layers) {
+    const group = layer.groupId ? groups.get(layer.groupId) : undefined;
+    if (group) appendGroup(group);
+    else host.append(createLayerRow(layer));
+  }
+  for (const group of [...groups.values()].reverse()) appendGroup(group);
+}

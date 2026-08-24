@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeoLibre Project Demo</title>
+    <style>
+      html {
+        visibility: hidden;
+      }
+    </style>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <input id="project-name" aria-label="Project 名称" />
+      <button id="new-project" class="icon-btn" data-tip="新建" aria-label="新建">
+        <img src="icons/new.svg" alt="" />
+      </button>
+      <button id="open-project" class="icon-btn" data-tip="打开" aria-label="打开">
+        <img src="icons/open.svg" alt="" />
+      </button>
+      <button id="save-project" class="icon-btn" data-tip="保存" aria-label="保存">
+        <img src="icons/save.svg" alt="" />
+      </button>
+      <span class="separator"></span>
+      <button id="add-vector" class="icon-btn" data-tip="矢量图层" aria-label="矢量图层">
+        <img src="icons/vector.svg" alt="" />
+      </button>
+      <button id="add-raster" class="icon-btn" data-tip="栅格图层" aria-label="栅格图层">
+        <img src="icons/raster.svg" alt="" />
+      </button>
+      <button id="add-basemap" class="icon-btn" data-tip="底图" aria-label="底图">
+        <img src="icons/basemap.svg" alt="" />
+      </button>
+      <button id="identify" class="icon-btn" data-tip="Identify" aria-label="Identify" aria-pressed="false">
+        <img src="icons/identify.svg" alt="" />
+      </button>
+      <button id="draw-geometry" class="icon-btn" data-tip="Editor" aria-label="Editor">
+        <img src="icons/geometry.svg" alt="" />
+      </button>
+    </header>
+    <main>
+      <aside>
+        <section id="layers-section" class="layers-section">
+          <div class="section-title">
+            <button id="layers-collapse" title="折叠 Layers" aria-expanded="true">▾</button>
+            <strong class="grow">Layers</strong>
+            <button id="add-group" title="新建 Group">＋</button>
+          </div>
+          <div id="layers" class="booting"></div>
+        </section>
+        <section id="style-editor" hidden></section>
+      </aside>
+      <div class="map-stage">
+        <div id="map"></div>
+        <div id="geom-bar" class="geom-bar" hidden></div>
+      </div>
+    </main>
+    <footer id="status">Ready</footer>
+    <input id="project-file" type="file" accept=".json,.geolibre" hidden />
+    <input id="vector-file" type="file" accept=".json,.geojson,.zip" hidden />
+    <input id="raster-file" type="file" accept=".tif,.tiff" hidden />
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -21,6 +21,8 @@ import {
   nextGeometryName,
   geometrySummary,
   dropFeature,
+  readLayerProps,
+  stampProps,
   withColor,
   type GeometryMode,
 } from "./geometry";
@@ -57,7 +59,7 @@ const ICONS: Record<GeometryMode, string> = {
   line: `<svg viewBox="0 0 24 24"><path d="M4 18 18 4" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="4" cy="18" r="2.2" fill="currentColor"/><circle cx="18" cy="4" r="2.2" fill="currentColor"/></svg>`,
   polygon: `<svg viewBox="0 0 24 24"><path d="M6 18 12 5l8 6-3 8H6z" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
   rectangle: `<svg viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
-  tilted: `<svg viewBox="0 0 24 24"><path d="M6 16 16 5l4 4-10 11Z" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
+  tilted: `<svg viewBox="0 0 24 24"><path d="M5 15 15 9l3 5-10 6Z" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
   delete: `<svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z" fill="currentColor"/></svg>`,
 };
 
@@ -199,20 +201,33 @@ function importsPanel(): HTMLElement {
 function session(): HTMLElement {
   const box = document.createElement("div");
   box.className = "geom-session";
-  box.append(status(), lockButton(), exitButton());
+  box.append(status(), exitButton());
   return box;
+}
+
+function geometriesGroupId(): string {
+  const groups = projectStore.getState().project.layerGroups ?? [];
+  return groups.find((group) => group.name === "Geometries")?.id ?? projectStore.getState().addGroup("Geometries");
+}
+
+function addGeometryToStore(layer: ReturnType<typeof createGeometryLayer>): void {
+  layer.groupId = geometriesGroupId();
+  projectStore.getState().addLayer(layer);
+  const layers = projectStore.getState().project.layers;
+  const first = layers.findIndex((item) => item.groupId === layer.groupId);
+  if (first >= 0 && layers[first]?.id !== layer.id) projectStore.getState().moveLayer(layer.id, first);
+  layerId = layer.id;
 }
 
 function addGeometryLayer(): void {
   const layers = projectStore.getState().project.layers.filter(isGeometryLayer);
-  const layer = createGeometryLayer(
-    nextGeometryName(layers.map((item) => item.name)),
-    nextGeometryColor(layers.map((item) => String(item.metadata.color ?? ""))),
+  addGeometryToStore(
+    createGeometryLayer(
+      nextGeometryName(layers.map((item) => item.name)),
+      nextGeometryColor(layers.map((item) => String(item.metadata.color ?? ""))),
+    ),
   );
-  projectStore.getState().addLayer(layer);
-  layerId = layer.id;
-  projectStore.getState().selectLayer(layer.id);
-
+  projectStore.getState().selectLayer(layerId);
 }
 
 function status(): HTMLElement {
@@ -220,22 +235,6 @@ function status(): HTMLElement {
   el.id = "geom-status";
   el.className = "geom-status";
   return el;
-}
-
-function lockButton(): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.id = "geom-lock";
-  button.title = "锁定";
-  button.addEventListener("click", () => {
-    const layer = current();
-    if (!layer) return;
-    const locked = layer.metadata.locked === true;
-    projectStore.getState().updateLayer(layer.id, {
-      metadata: { ...layer.metadata, locked: !locked },
-    });
-  });
-  return button;
 }
 
 function exitButton(): HTMLButtonElement {
@@ -263,8 +262,7 @@ function ensureLayer(): ReturnType<typeof current> {
     return existing;
   }
   const layer = createGeometryLayer();
-  projectStore.getState().addLayer(layer);
-  layerId = layer.id;
+  addGeometryToStore(layer);
   return layer;
 }
 
@@ -280,10 +278,6 @@ function current() {
 
 function collection(): FeatureCollection {
   return current()?.geojson ?? EMPTY;
-}
-
-function locked(): boolean {
-  return current()?.metadata.locked === true;
 }
 
 function color(): string {
@@ -302,7 +296,9 @@ function commit(features: Feature[]): void {
 function addFeature(feature: Feature | null): void {
   const accepted = acceptCommit(draw.mode, feature);
   if (!accepted) return;
-  commit([...collection().features, accepted]);
+  const layer = ensureLayer();
+  if (!layer) return;
+  commit([...collection().features, stampProps(accepted, readLayerProps(layer.metadata))]);
 }
 
 function applyStep(step: { state: DrawState; commit: Feature | null }): void {
@@ -335,7 +331,7 @@ function onClick(event: maplibregl.MapMouseEvent): void {
     deleteAt(event);
     return;
   }
-  if (draw.mode === "pan" || locked()) return;
+  if (draw.mode === "pan") return;
   if ((event.originalEvent.target as HTMLElement | null)?.closest(".gee-pin")) return;
   applyStep(clickDraw(draw, [event.lngLat.lng, event.lngLat.lat]));
 }
@@ -347,7 +343,7 @@ function deleteAt(event: maplibregl.MapMouseEvent): void {
 
 function removeHit(hit: { layerId: string; index: number }): void {
   const layer = projectStore.getState().project.layers.find((item) => item.id === hit.layerId);
-  if (!layer?.geojson || layer.metadata.locked === true) return;
+  if (!layer?.geojson) return;
   projectStore.getState().updateLayer(layer.id, { geojson: dropFeature(layer.geojson, hit.index) });
 }
 
@@ -389,7 +385,7 @@ function onMouseDown(event: maplibregl.MapMouseEvent): void {
   skipClick = false;
   downPoint = event.point;
   downLngLat = [event.lngLat.lng, event.lngLat.lat];
-  if (!bar.hidden && !locked() && draw.mode === "rectangle") map.dragPan.disable();
+  if (!bar.hidden && draw.mode === "rectangle") map.dragPan.disable();
 }
 
 function onMouseMove(event: maplibregl.MapMouseEvent): void {
@@ -538,37 +534,129 @@ function paint(): void {
   }
   const cursor = draw.draft.at(-1) ?? draw.rectStart;
   setDraftData(cursor ? previewDraw(draw, cursor) : null, draw.draft);
-  syncMarkers(features, !locked());
+  syncMarkers(features, true);
   syncBar(current());
   raiseGeometryLayers();
 }
 
 function syncBar(layer: ReturnType<typeof current>): void {
   const list = bar.querySelector("#geom-import-list");
-  if (list && !list.contains(document.activeElement)) {
-    const layers = projectStore.getState().project.layers.filter(isGeometryLayer);
+  const editing = document.activeElement;
+  const renaming =
+    list != null &&
+    editing instanceof HTMLInputElement &&
+    editing.type === "text" &&
+    list.contains(editing);
+  if (list && !renaming) {
+    const layers = projectStore.getState().project.layers.filter(isGeometryLayer).reverse();
     list.replaceChildren(...layers.map((item) => importRow(item, item.id === layer?.id)));
   }
   const statusEl = bar.querySelector("#geom-status");
-  const lock = bar.querySelector<HTMLButtonElement>("#geom-lock");
   const all = bar.querySelector<HTMLInputElement>("#geom-all-visible");
   if (all && document.activeElement !== all) {
     const layers = projectStore.getState().project.layers.filter(isGeometryLayer);
     all.checked = layers.length > 0 && layers.every((item) => item.visible);
   }
   if (statusEl) statusEl.textContent = modeStatus(draw.mode);
-  if (lock) {
-    const on = layer?.metadata.locked === true;
-    lock.classList.toggle("on", on);
-    lock.title = on ? "解锁" : "锁定";
-    lock.textContent = on ? "🔒" : "🔓";
-  }
   for (const button of bar.querySelectorAll<HTMLButtonElement>(".geom-tools button")) {
     button.classList.toggle("active", button.dataset.mode === draw.mode);
   }
 }
 
-function importRow(layer: { id: string; name: string; visible: boolean; geojson?: FeatureCollection; metadata: { color?: unknown } }, selected: boolean): HTMLElement {
+function openPropsDialog(layer: {
+  id: string;
+  name: string;
+  geojson?: FeatureCollection;
+  metadata: { color?: unknown; props?: unknown };
+}): void {
+  document.querySelector(".geom-props")?.remove();
+  const draft = Object.entries(readLayerProps(layer.metadata)).map(([key, value]) => ({ key, value }));
+  const dialog = document.createElement("dialog");
+  dialog.className = "geom-props";
+  const title = document.createElement("strong");
+  title.textContent = `属性 · ${layer.name}`;
+  const list = document.createElement("div");
+  const add = document.createElement("button");
+  add.type = "button";
+  add.textContent = "+ 添加属性";
+  const actions = document.createElement("div");
+  actions.className = "geom-props-actions";
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.textContent = "确定";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "取消";
+  actions.append(ok, cancel);
+  dialog.append(title, list, add, actions);
+
+  const paintRows = () => {
+    list.replaceChildren();
+    if (!draft.length) {
+      const empty = document.createElement("p");
+      empty.className = "geom-props-empty";
+      empty.textContent = "暂无属性。";
+      list.append(empty);
+      return;
+    }
+    for (const row of draft) {
+      const line = document.createElement("div");
+      line.className = "geom-props-row";
+      const key = document.createElement("input");
+      key.placeholder = "名称";
+      key.value = row.key;
+      key.addEventListener("input", () => {
+        row.key = key.value;
+      });
+      const value = document.createElement("input");
+      value.placeholder = "值";
+      value.value = row.value;
+      value.addEventListener("input", () => {
+        row.value = value.value;
+      });
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.textContent = "×";
+      drop.addEventListener("click", () => {
+        draft.splice(draft.indexOf(row), 1);
+        paintRows();
+      });
+      line.append(key, value, drop);
+      list.append(line);
+    }
+  };
+
+  add.addEventListener("click", () => {
+    draft.push({ key: "", value: "" });
+    paintRows();
+    list.querySelector<HTMLInputElement>(".geom-props-row:last-child input")?.focus();
+  });
+  cancel.addEventListener("click", () => dialog.close());
+  ok.addEventListener("click", () => {
+    const props: Record<string, string> = {};
+    for (const row of draft) {
+      const key = row.key.trim();
+      if (key) props[key] = row.value;
+    }
+    const target = projectStore.getState().project.layers.find((item) => item.id === layer.id);
+    if (target) {
+      projectStore.getState().updateLayer(layer.id, {
+        metadata: { ...target.metadata, props },
+        geojson: {
+          type: "FeatureCollection",
+          features: (target.geojson?.features ?? []).map((feature) => stampProps(feature, props)),
+        },
+      });
+    }
+    dialog.close();
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  paintRows();
+  document.body.append(dialog);
+  dialog.showModal();
+}
+
+function importRow(layer: { id: string; name: string; visible: boolean; geojson?: FeatureCollection; metadata: { color?: unknown; props?: unknown } }, selected: boolean): HTMLElement {
   const row = document.createElement("div");
   row.className = `geom-import-row${selected ? " selected" : ""}`;
   const visible = document.createElement("input");
@@ -599,6 +687,15 @@ function importRow(layer: { id: string; name: string; visible: boolean; geojson?
     const target = projectStore.getState().project.layers.find((item) => item.id === layer.id);
     if (target) projectStore.getState().updateLayer(layer.id, withColor(target, swatch.value));
   });
+  const settings = document.createElement("button");
+  settings.type = "button";
+  settings.className = "geom-del";
+  settings.title = "设置";
+  settings.textContent = "⚙";
+  settings.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openPropsDialog(layer);
+  });
   const del = document.createElement("button");
   del.type = "button";
   del.className = "geom-del";
@@ -606,9 +703,10 @@ function importRow(layer: { id: string; name: string; visible: boolean; geojson?
   del.textContent = "×";
   del.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (layer.geojson?.features.length && !confirm(`移除图层“${layer.name}”？`)) return;
     projectStore.getState().removeLayer(layer.id);
   });
-  row.append(visible, name, count, swatch, del);
+  row.append(visible, name, count, swatch, settings, del);
   row.addEventListener("click", () => selectImport(layer.id));
   return row;
 }

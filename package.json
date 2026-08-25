@@ -13,6 +13,8 @@
   "dependencies": {
     "@geolibre/core": "^2.7.0",
     "@geolibre/map": "^2.7.0",
+    "@google/earthengine": "^1.7.41",
+    "ee-auth": "file:/mnt/z/GitHub/gee-hydro/gee-helper.ts/packages/ee-auth",
     "maplibre-gl": "^6.3.0",
     "maplibre-gl-basemap-control": "^0.14.0",
     "maplibre-gl-raster": "^0.14.7",

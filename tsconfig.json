@@ -10,9 +10,9 @@
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@geolibre/plugins/basemap-thumbnails": ["./geolibre/basemap-thumbnails.ts"]
+      "@geolibre/plugins/basemap-thumbnails": ["plugins/basemap-thumbnails.ts"]
     }
   },
-  "include": ["src", "geolibre", "tests", "vite.config.ts"],
+  "include": ["src", "geolibre", "tests", "vite.config.ts", "plugins/basemap-thumbnails.ts"],
   "exclude": ["tests/e2e"]
 }

@@ -10,6 +10,7 @@ import {
 import { projectStore } from "./project-store";
 import { isGeometryLayer } from "./geometry";
 import { raiseGeometryLayers } from "./geometry-editor";
+import { syncGeeRaster } from "./earthengine";
 import { isProjectRaster, type RasterAdapter } from "./raster";
 
 /** Control already called map.setStyle; skip the renderer's second reload. */
@@ -60,6 +61,7 @@ export function createProjectRenderer(map: maplibregl.Map, raster: RasterAdapter
       paintBasemapVisibility();
     }
     raster.sync(project.layers, project.layerGroups ?? [], { zoomTo: allowRasterZoom });
+    for (const layer of project.layers) syncGeeRaster(layer);
     raiseGeometryLayers();
     allowRasterZoom = true;
   };

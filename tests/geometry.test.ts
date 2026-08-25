@@ -9,6 +9,8 @@ import {
   dropFeature,
   nextGeometryColor,
   nextGeometryName,
+  readLayerProps,
+  stampProps,
   orientedRing,
   pointFeature,
   polygonFeature,
@@ -47,7 +49,7 @@ test("rectangleRing is a closed box", () => {
 test("modeStatus matches GEE copy", () => {
   assert.equal(modeStatus("point"), "Point drawing.");
   assert.equal(modeStatus("pan"), "");
-  assert.equal(modeStatus("delete"), "Click a geometry to delete.");
+  assert.equal(modeStatus("delete"), "");
 });
 
 test("dropFeature removes by index", () => {
@@ -73,12 +75,23 @@ test("line is a line layer, not points", () => {
   assert.equal(geometrySummary(collection).includes("pt"), false);
 });
 
-test("orientedRing is perpendicular to the first edge", () => {
-  const ring = orientedRing([0, 0], [2, 2], [0, 2]);
+test("orientedRing corners are square on Mercator", () => {
+  const ring = orientedRing([110, 35], [112, 36.5], [109, 37]);
   assert.ok(ring);
-  const edge: [number, number] = [ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]];
-  const pull: [number, number] = [ring[3][0] - ring[0][0], ring[3][1] - ring[0][1]];
-  assert.equal(edge[0] * pull[0] + edge[1] * pull[1], 0);
+  const r = Math.PI / 180;
+  const xy = (p: [number, number]): [number, number] => [
+    p[0] * r,
+    Math.log(Math.tan(Math.PI / 4 + (p[1] * r) / 2)),
+  ];
+  const pts = ring.slice(0, 4).map((p) => xy(p as [number, number]));
+  for (let i = 0; i < 4; i++) {
+    const q = pts[(i + 3) % 4];
+    const p = pts[i];
+    const s = pts[(i + 1) % 4];
+    const u = [p[0] - q[0], p[1] - q[1]];
+    const v = [s[0] - p[0], s[1] - p[1]];
+    assert.ok(Math.abs(u[0] * v[0] + u[1] * v[1]) < 1e-12);
+  }
   assert.equal(collectionKind({ type: "FeatureCollection", features: [polygonFeature(ring.slice(0, 4))!] }), "poly");
 });
 
@@ -123,4 +136,11 @@ test("next geometry name and color", () => {
   assert.equal(nextGeometryName([]), "geometry");
   assert.equal(nextGeometryName(["geometry"]), "geometry 2");
   assert.equal(nextGeometryColor(["#c62828"]), "#1565c0");
+});
+
+test("stamp layer props onto features", () => {
+  assert.deepEqual(readLayerProps({ props: { name: "A", n: 1 } }), { name: "A", n: "1" });
+  const feature = stampProps(pointFeature([0, 0]), { name: "A" });
+  assert.equal(feature.properties?.name, "A");
+  assert.equal(feature.properties?.kind, "point");
 });

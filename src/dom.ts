@@ -1,3 +1,15 @@
+export function element<T extends HTMLElement>(id: string): T {
+  const value = document.getElementById(id);
+  if (!value) throw new Error(`Missing #${id}`);
+  return value as T;
+}
+
+export function setStatus(message: string, error = false): void {
+  const status = element("status");
+  status.textContent = message;
+  status.classList.toggle("error", error);
+}
+
 export function labeledControl(label: string, control: HTMLElement): HTMLLabelElement {
   const row = document.createElement("label");
   row.className = "field";

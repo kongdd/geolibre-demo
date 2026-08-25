@@ -105,16 +105,30 @@ export function rectangleRing(a: Position, b: Position): Position[] {
   ];
 }
 
+const RAD = Math.PI / 180;
+
+function merc(p: Position): [number, number] {
+  const lat = Math.max(-85, Math.min(85, p[1]));
+  return [p[0] * RAD, Math.log(Math.tan(Math.PI / 4 + (lat * RAD) / 2))];
+}
+
+function unmerc(p: [number, number]): Position {
+  return [p[0] / RAD, (2 * Math.atan(Math.exp(p[1])) - Math.PI / 2) / RAD];
+}
+
 export function orientedRing(a: Position, b: Position, cursor: Position): Position[] | null {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
+  const A = merc(a);
+  const B = merc(b);
+  const P = merc(cursor);
+  const dx = B[0] - A[0];
+  const dy = B[1] - A[1];
   const len2 = dx * dx + dy * dy;
   if (len2 < 1e-16) return null;
-  const t = ((cursor[0] - b[0]) * -dy + (cursor[1] - b[1]) * dx) / len2;
+  const t = ((P[0] - B[0]) * -dy + (P[1] - B[1]) * dx) / len2;
   const ox = -dy * t;
   const oy = dx * t;
   if (ox * ox + oy * oy < 1e-16) return null;
-  return [a, b, [b[0] + ox, b[1] + oy], [a[0] + ox, a[1] + oy], a];
+  return [a, b, unmerc([B[0] + ox, B[1] + oy]), unmerc([A[0] + ox, A[1] + oy]), a];
 }
 
 export function modeStatus(mode: GeometryMode): string {
@@ -123,7 +137,6 @@ export function modeStatus(mode: GeometryMode): string {
   if (mode === "polygon") return "Polygon drawing.";
   if (mode === "rectangle") return "Rectangle drawing.";
   if (mode === "tilted") return "Tilted rectangle.";
-  if (mode === "delete") return "Click a geometry to delete.";
   return "";
 }
 
@@ -149,7 +162,7 @@ export function createGeometryLayer(name = "geometry", color = DEFAULT_GEOMETRY_
       strokeColor: color,
       strokeWidth: 2,
     },
-    metadata: { sourceKind: GEOMETRY_KIND, color, locked: false },
+    metadata: { sourceKind: GEOMETRY_KIND, color },
   };
 }
 
@@ -158,6 +171,20 @@ export function withColor(layer: GeoLibreLayer, color: string): Partial<GeoLibre
     style: { ...layer.style, fillColor: `${color}40`, strokeColor: color },
     metadata: { ...layer.metadata, color },
   };
+}
+
+export function readLayerProps(metadata: { props?: unknown }): Record<string, string> {
+  const value = metadata.props;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key) out[key] = item == null ? "" : String(item);
+  }
+  return out;
+}
+
+export function stampProps(feature: Feature, props: Record<string, string>): Feature {
+  return { ...feature, properties: { ...feature.properties, ...props } };
 }
 
 export function pointFeature(position: Position): Feature {

@@ -6,6 +6,7 @@ import {
 } from "maplibre-gl-raster";
 import { button, field, labeledControl } from "./dom";
 import { projectStore } from "./project-store";
+import { fetchEeBands, isGeeRaster, type EeVis } from "./earthengine";
 import { isProjectRaster, pickRasterState } from "./raster";
 
 export type LayerUiActions = {
@@ -133,6 +134,210 @@ function commitRasterState(layer: GeoLibreLayer, patch: Record<string, unknown>)
 
 function stylePatch(layer: GeoLibreLayer, patch: Partial<LayerStyle>): void {
   projectStore.getState().updateLayer(layer.id, { style: { ...layer.style, ...patch } });
+}
+
+function hex6(value: string): string {
+  const hex = value.replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) return hex.split("").map((item) => item + item).join("");
+  return /^[0-9a-f]{6}$/i.test(hex) ? hex : "000000";
+}
+
+function paletteOf(vis: EeVis): string[] {
+  if (Array.isArray(vis.palette)) return vis.palette.map((item) => hex6(String(item)));
+  if (typeof vis.palette === "string" && vis.palette.trim()) {
+    return vis.palette.split(",").map((item) => hex6(item.trim()));
+  }
+  return ["000000", "ffffff"];
+}
+
+function commitGeeVis(layer: GeoLibreLayer, vis: EeVis): void {
+  const prev =
+    layer.metadata.rasterState && typeof layer.metadata.rasterState === "object"
+      ? { ...layer.metadata.rasterState }
+      : {};
+  projectStore.getState().updateLayer(layer.id, {
+    metadata: {
+      ...layer.metadata,
+      eeVis: vis,
+      eeVisFp: undefined,
+      rasterState: {
+        ...prev,
+        rescale: vis.min != null && vis.max != null ? [[vis.min, vis.max]] : null,
+        colormap: vis.palette
+          ? Array.isArray(vis.palette)
+            ? vis.palette.join(",")
+            : vis.palette
+          : undefined,
+        bands: vis.bands,
+      },
+    },
+  });
+}
+
+function geeRadios(
+  name: string,
+  options: Array<[string, string]>,
+  value: string,
+  onChange: (value: string) => void,
+): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "gee-vis-row";
+  for (const [id, label] of options) {
+    const wrap = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = name;
+    input.value = id;
+    input.checked = value === id;
+    input.addEventListener("change", () => onChange(id));
+    wrap.append(input, label);
+    row.append(wrap);
+  }
+  return row;
+}
+
+function bandSelect(names: string[], value: string, onChange: (value: string) => void): HTMLSelectElement {
+  const select = document.createElement("select");
+  const options = names.includes(value) || !value ? names : [value, ...names];
+  if (!options.length) options.push(value || "0");
+  for (const name of options) select.append(new Option(name, name));
+  select.value = value || options[0] || "";
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
+  const vis =
+    layer.metadata.eeVis && typeof layer.metadata.eeVis === "object"
+      ? ({ ...layer.metadata.eeVis } as EeVis)
+      : {};
+  const names = Array.isArray(layer.metadata.eeBands) ? layer.metadata.eeBands.map(String) : [];
+  const asset = typeof layer.metadata.eeAsset === "string" ? layer.metadata.eeAsset : "";
+  const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
+  if (asset && !names.length) {
+    void fetchEeBands(asset, kind)
+      .then((bands) => {
+        if (projectStore.getState().selectedLayerId !== layer.id) return;
+        projectStore.getState().updateLayer(layer.id, {
+          metadata: { ...layer.metadata, eeBands: bands },
+        });
+      })
+      .catch((error) => console.error(error));
+  }
+  const current = (vis.bands ?? []).map(String);
+  const rgb = current.length >= 3;
+  const colorMode = vis.gamma != null && !(vis.palette && (Array.isArray(vis.palette) ? vis.palette.length : vis.palette)) ? "gamma" : "palette";
+
+  const apply = (patch: EeVis) => commitGeeVis(layer, { ...vis, ...patch });
+
+  const title = document.createElement("div");
+  title.className = "gee-vis-title";
+  title.textContent = "Visualization";
+
+  const mode = geeRadios(
+    `gee-mode-${layer.id}`,
+    [
+      ["1", "1 band (Grayscale)"],
+      ["3", "3 bands (RGB)"],
+    ],
+    rgb ? "3" : "1",
+    (value) => {
+      const first = current[0] || names[0] || "0";
+      apply({
+        bands: value === "3" ? [first, current[1] || first, current[2] || first] : [first],
+        palette: value === "3" ? undefined : vis.palette ?? paletteOf(vis),
+      });
+    },
+  );
+
+  const bandRow = document.createElement("div");
+  bandRow.className = rgb ? "gee-bands rgb" : "gee-bands";
+  const pick = (index: number) => (value: string) => {
+    const next = rgb ? [current[0] || names[0], current[1] || names[0], current[2] || names[0]] : [current[0] || names[0]];
+    next[index] = value;
+    apply({ bands: next });
+  };
+  if (rgb) {
+    bandRow.append(
+      bandSelect(names, current[0] || names[0] || "", pick(0)),
+      bandSelect(names, current[1] || names[1] || names[0] || "", pick(1)),
+      bandSelect(names, current[2] || names[2] || names[0] || "", pick(2)),
+    );
+  } else {
+    bandRow.append(bandSelect(names, current[0] || names[0] || "", pick(0)));
+  }
+
+  const min = document.createElement("input");
+  const max = document.createElement("input");
+  min.type = max.type = "number";
+  min.value = vis.min == null ? "" : String(vis.min);
+  max.value = vis.max == null ? "" : String(vis.max);
+  const commitRange = () => {
+    const lo = min.value.trim() === "" ? undefined : Number(min.value);
+    const hi = max.value.trim() === "" ? undefined : Number(max.value);
+    apply({
+      min: lo != null && Number.isFinite(lo) ? lo : undefined,
+      max: hi != null && Number.isFinite(hi) ? hi : undefined,
+    });
+  };
+  min.addEventListener("change", commitRange);
+  max.addEventListener("change", commitRange);
+  const range = document.createElement("div");
+  range.className = "gee-range";
+  const dash = document.createElement("span");
+  dash.textContent = "–";
+  range.append(min, dash, max);
+
+  const extras: HTMLElement[] = [];
+  if (!rgb) {
+    extras.push(
+      geeRadios(
+        `gee-color-${layer.id}`,
+        [
+          ["gamma", "Gamma"],
+          ["palette", "Palette"],
+        ],
+        colorMode,
+        (value) => {
+          if (value === "gamma") apply({ gamma: vis.gamma ?? 1, palette: undefined });
+          else apply({ gamma: undefined, palette: paletteOf({ ...vis, palette: vis.palette }) });
+        },
+      ),
+    );
+    if (colorMode === "gamma") {
+      const gamma = document.createElement("input");
+      gamma.type = "number";
+      gamma.min = "0.1";
+      gamma.step = "0.1";
+      gamma.value = String(vis.gamma ?? 1);
+      gamma.addEventListener("change", () => {
+        const value = Number(gamma.value);
+        apply({ gamma: value > 0 ? value : 1, palette: undefined });
+      });
+      extras.push(labeledControl("Gamma", gamma));
+    } else {
+      const chips = document.createElement("div");
+      chips.className = "gee-palette";
+      const colors = paletteOf(vis);
+      for (const [index, color] of colors.entries()) {
+        const input = document.createElement("input");
+        input.type = "color";
+        input.value = `#${hex6(color)}`;
+        input.addEventListener("change", () => {
+          const next = [...colors];
+          next[index] = hex6(input.value);
+          apply({ palette: next, gamma: undefined });
+        });
+        chips.append(input);
+      }
+      chips.append(
+        button("+", () => apply({ palette: [...colors, colors[colors.length - 1] ?? "ffffff"], gamma: undefined })),
+      );
+      extras.push(field("Palette", chips));
+    }
+  }
+
+  return [title, mode, field("Bands", bandRow), field("Range", range), ...extras];
 }
 
 export function renderStyleEditor(): void {
@@ -263,6 +468,8 @@ export function renderStyleEditor(): void {
       labeledControl("Stretch", stretch),
       labeledControl("Gamma", gamma),
     );
+  } else if (isGeeRaster(layer)) {
+    host.append(...geeVisEditor(layer));
   }
 
   const row = document.createElement("div");

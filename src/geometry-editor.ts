@@ -1,21 +1,40 @@
 import type { Feature, FeatureCollection, Position } from "geojson";
+
+declare global {
+  interface Window {
+    __geometryDump?: () => {
+      mode: string;
+      draft: number;
+      open: boolean;
+      layers: { name: string; types: string[] }[];
+    };
+  }
+}
 import * as maplibregl from "maplibre-gl";
 import {
   createGeometryLayer,
   DEFAULT_GEOMETRY_COLOR,
   emptyCollection,
   isGeometryLayer,
-  lineFeature,
   modeStatus,
   nextGeometryColor,
   nextGeometryName,
-  pointFeature,
-  polygonFeature,
-  rectangleRing,
-  vertexCount,
+  geometrySummary,
+  dropFeature,
   withColor,
   type GeometryMode,
 } from "./geometry";
+import {
+  acceptCommit,
+  clickDraw,
+  emptyDraw,
+  finishDraw,
+  finishRect,
+  previewDraw,
+  setDrawMode,
+  type DrawState,
+} from "./geometry-draw";
+import { contextMenuButton, showContextMenu } from "./layer-tree";
 import { projectStore } from "./project-store";
 
 const SOURCE = "gee-geom";
@@ -24,13 +43,13 @@ const EMPTY = emptyCollection();
 
 let map: maplibregl.Map;
 let bar: HTMLElement;
-let mode: GeometryMode = "pan";
 let layerId: string | null = null;
-let draft: Position[] = [];
-let rectStart: Position | null = null;
+let draw: DrawState = emptyDraw();
 let markers: maplibregl.Marker[] = [];
 let moved = false;
+let skipClick = false;
 let downPoint: { x: number; y: number } | null = null;
+let downLngLat: Position | null = null;
 
 const ICONS: Record<GeometryMode, string> = {
   pan: `<svg viewBox="0 0 24 24"><path d="M8 11V6.5a1.5 1.5 0 0 1 3 0V11h.5V5.5a1.5 1.5 0 0 1 3 0V11h.5V7a1.5 1.5 0 0 1 3 0v8.5a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5v-3a1.5 1.5 0 0 1 3 0V11Z" fill="currentColor"/></svg>`,
@@ -38,6 +57,8 @@ const ICONS: Record<GeometryMode, string> = {
   line: `<svg viewBox="0 0 24 24"><path d="M4 18 18 4" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="4" cy="18" r="2.2" fill="currentColor"/><circle cx="18" cy="4" r="2.2" fill="currentColor"/></svg>`,
   polygon: `<svg viewBox="0 0 24 24"><path d="M6 18 12 5l8 6-3 8H6z" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
   rectangle: `<svg viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12" rx="1" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
+  tilted: `<svg viewBox="0 0 24 24"><path d="M6 16 16 5l4 4-10 11Z" stroke="currentColor" stroke-width="1.8" fill="none"/></svg>`,
+  delete: `<svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2zm-2 6h2v9H7V9zm4 0h2v9h-2V9zm4 0h2v9h-2V9z" fill="currentColor"/></svg>`,
 };
 
 export function isGeometryEditorOpen(): boolean {
@@ -45,13 +66,12 @@ export function isGeometryEditorOpen(): boolean {
 }
 
 export function isGeometryDrawing(): boolean {
-  return Boolean(bar) && !bar.hidden && mode !== "pan";
+  return Boolean(bar) && !bar.hidden && draw.mode !== "pan";
 }
 
 export function openGeometryEditor(): void {
   bar.hidden = false;
   ensureLayer();
-  if (mode === "pan") setMode("pan");
   paint();
 }
 
@@ -64,7 +84,7 @@ export function closeGeometryEditor(): void {
 }
 
 export function cancelGeometryDraft(): boolean {
-  if (!draft.length && !rectStart) return false;
+  if (!draw.draft.length && !draw.rectStart) return false;
   cancelDraft();
   paint();
   return true;
@@ -76,9 +96,10 @@ export function bindGeometryEditor(nextMap: maplibregl.Map, host: HTMLElement): 
   bar.className = "geom-bar";
   bar.hidden = true;
   bar.replaceChildren();
-  bar.append(tools(), importsPanel(), status(), lockButton(), exitButton());
+  bar.append(tools(), importsPanel(), session());
 
   map.on("click", onClick);
+  map.on("contextmenu", onContextMenu);
   map.on("dblclick", onDblClick);
   map.on("mousedown", onMouseDown);
   map.on("mousemove", onMouseMove);
@@ -87,10 +108,12 @@ export function bindGeometryEditor(nextMap: maplibregl.Map, host: HTMLElement): 
   window.addEventListener("keydown", onKey);
   const unsub = projectStore.subscribe(paint);
   paint();
+  window.__geometryDump = dumpGeometry;
 
   return () => {
     unsub();
     map.off("click", onClick);
+    map.off("contextmenu", onContextMenu);
     map.off("dblclick", onDblClick);
     map.off("mousedown", onMouseDown);
     map.off("mousemove", onMouseMove);
@@ -98,6 +121,23 @@ export function bindGeometryEditor(nextMap: maplibregl.Map, host: HTMLElement): 
     map.off("style.load", onStyleLoad);
     window.removeEventListener("keydown", onKey);
     clearMarkers();
+    delete window.__geometryDump;
+  };
+}
+
+function dumpGeometry() {
+  return {
+    mode: draw.mode,
+    draft: draw.draft.length,
+    open: Boolean(bar) && !bar.hidden,
+    layers: projectStore
+      .getState()
+      .project.layers.filter(isGeometryLayer)
+      .map((layer) => ({
+        name: layer.name,
+        types: (layer.geojson?.features ?? []).map((feature) => feature.geometry.type),
+      })),
+    top: (map.getStyle()?.layers ?? []).slice(-5).map((layer) => layer.id),
   };
 }
 
@@ -113,11 +153,11 @@ function onKey(event: KeyboardEvent): void {
 function tools(): HTMLElement {
   const row = document.createElement("div");
   row.className = "geom-tools";
-  for (const item of ["pan", "point", "line", "polygon", "rectangle"] as const) {
+  for (const item of ["pan", "point", "line", "polygon", "rectangle", "tilted", "delete"] as const) {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.mode = item;
-    button.title = item;
+    button.title = item === "tilted" ? "tilted rectangle" : item;
     button.innerHTML = ICONS[item];
     button.addEventListener("click", () => {
       bar.hidden = false;
@@ -131,6 +171,20 @@ function tools(): HTMLElement {
 function importsPanel(): HTMLElement {
   const box = document.createElement("div");
   box.className = "geom-imports";
+  const head = document.createElement("label");
+  head.className = "geom-imports-head";
+  const all = document.createElement("input");
+  all.type = "checkbox";
+  all.id = "geom-all-visible";
+  all.checked = true;
+  all.addEventListener("change", () => {
+    for (const layer of projectStore.getState().project.layers.filter(isGeometryLayer)) {
+      projectStore.getState().updateLayer(layer.id, { visible: all.checked });
+    }
+  });
+  const title = document.createElement("strong");
+  title.textContent = "Geometry Imports";
+  head.append(all, title);
   const list = document.createElement("div");
   list.id = "geom-import-list";
   const add = document.createElement("button");
@@ -138,7 +192,14 @@ function importsPanel(): HTMLElement {
   add.id = "geom-new";
   add.textContent = "+ new layer";
   add.addEventListener("click", addGeometryLayer);
-  box.append(list, add);
+  box.append(head, list, add);
+  return box;
+}
+
+function session(): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "geom-session";
+  box.append(status(), lockButton(), exitButton());
   return box;
 }
 
@@ -151,7 +212,7 @@ function addGeometryLayer(): void {
   projectStore.getState().addLayer(layer);
   layerId = layer.id;
   projectStore.getState().selectLayer(layer.id);
-  if (mode === "pan") setMode("point");
+
 }
 
 function status(): HTMLElement {
@@ -187,11 +248,10 @@ function exitButton(): HTMLButtonElement {
 }
 
 function setMode(next: GeometryMode): void {
-  if (next !== mode) cancelDraft();
-  mode = next;
-  if (next !== "pan") ensureLayer();
+  draw = setDrawMode(next);
+  if (next !== "pan" && next !== "delete") ensureLayer();
   map.doubleClickZoom[next === "pan" ? "enable" : "disable"]();
-  map.getCanvas().style.cursor = next === "pan" ? "" : "crosshair";
+  map.getCanvas().style.cursor = next === "pan" ? "" : next === "delete" ? "pointer" : "crosshair";
   paint();
 }
 
@@ -240,61 +300,96 @@ function commit(features: Feature[]): void {
 }
 
 function addFeature(feature: Feature | null): void {
-  if (!feature) return;
-  if (mode !== "point" && feature.geometry.type === "Point") return;
-  commit([...collection().features, feature]);
+  const accepted = acceptCommit(draw.mode, feature);
+  if (!accepted) return;
+  commit([...collection().features, accepted]);
+}
+
+function applyStep(step: { state: DrawState; commit: Feature | null }): void {
+  draw = step.state;
+  addFeature(step.commit);
+  paint();
 }
 
 function cancelDraft(): void {
-  draft = [];
-  rectStart = null;
+  draw = { ...draw, draft: [], rectStart: null };
   downPoint = null;
+  downLngLat = null;
   map.dragPan.enable();
 }
 
+function dragged(event: maplibregl.MapMouseEvent): boolean {
+  return Boolean(
+    downPoint && Math.hypot(event.point.x - downPoint.x, event.point.y - downPoint.y) > 4,
+  );
+}
+
 function onClick(event: maplibregl.MapMouseEvent): void {
-  if (bar.hidden || mode === "pan" || locked() || moved || event.originalEvent.detail > 1) return;
-  if ((event.originalEvent.target as HTMLElement | null)?.closest(".geom-bar, .gee-pin")) return;
-  const point: Position = [event.lngLat.lng, event.lngLat.lat];
-  if (mode === "point") {
-    addFeature(pointFeature(point));
+  if (skipClick) {
+    skipClick = false;
     return;
   }
-  if (mode === "line" || mode === "polygon") {
-    draft = [...draft, point];
-    paint();
+  if (bar.hidden || dragged(event) || event.originalEvent.detail > 1) return;
+  if ((event.originalEvent.target as HTMLElement | null)?.closest(".geom-bar")) return;
+  if (draw.mode === "delete") {
+    deleteAt(event);
     return;
   }
-  if (mode === "rectangle") {
-    if (!rectStart) {
-      rectStart = point;
-      return;
-    }
-    addFeature(polygonFeature(rectangleRing(rectStart, point).slice(0, 4)));
-    cancelDraft();
-    paint();
+  if (draw.mode === "pan" || locked()) return;
+  if ((event.originalEvent.target as HTMLElement | null)?.closest(".gee-pin")) return;
+  applyStep(clickDraw(draw, [event.lngLat.lng, event.lngLat.lat]));
+}
+
+function deleteAt(event: maplibregl.MapMouseEvent): void {
+  const hit = hitGeometry(event);
+  if (hit) removeHit(hit);
+}
+
+function removeHit(hit: { layerId: string; index: number }): void {
+  const layer = projectStore.getState().project.layers.find((item) => item.id === hit.layerId);
+  if (!layer?.geojson || layer.metadata.locked === true) return;
+  projectStore.getState().updateLayer(layer.id, { geojson: dropFeature(layer.geojson, hit.index) });
+}
+
+function onContextMenu(event: maplibregl.MapMouseEvent): void {
+  if (bar.hidden) return;
+  const hit = hitGeometry(event);
+  if (!hit) return;
+  event.preventDefault();
+  showContextMenu(event.originalEvent, [contextMenuButton("删除", () => removeHit(hit), true)]);
+}
+
+function hitGeometry(event: maplibregl.MapMouseEvent): { layerId: string; index: number } | null {
+  const pin = (event.originalEvent.target as HTMLElement | null)?.closest(".gee-pin");
+  if (pin instanceof HTMLElement && pin.dataset.layerId && pin.dataset.index != null) {
+    return { layerId: pin.dataset.layerId, index: Number(pin.dataset.index) };
   }
+  const ids = [`${SOURCE}-fill`, `${SOURCE}-line`].filter((id) => map.getLayer(id));
+  if (!ids.length) return null;
+  for (const feature of map.queryRenderedFeatures(event.point, { layers: ids })) {
+    const layerId = feature.properties?.layerId;
+    const index = Number(feature.properties?.index);
+    if (typeof layerId === "string" && Number.isInteger(index)) return { layerId, index };
+  }
+  return null;
 }
 
 function onDblClick(event: maplibregl.MapMouseEvent): void {
-  if (mode !== "line" && mode !== "polygon") return;
+  if (draw.mode !== "line" && draw.mode !== "polygon") return;
   event.preventDefault();
-  finishPath();
+  applyStep(finishDraw(draw));
 }
 
 function finishPath(): void {
-  if (mode !== "line" && mode !== "polygon") return;
-  addFeature(mode === "line" ? lineFeature(draft) : polygonFeature(draft));
-  draft = [];
-  paint();
+  applyStep(finishDraw(draw));
 }
 
 function onMouseDown(event: maplibregl.MapMouseEvent): void {
   moved = false;
+  skipClick = false;
   downPoint = event.point;
-  if (bar.hidden || locked() || mode !== "rectangle") return;
-  if (!rectStart) rectStart = [event.lngLat.lng, event.lngLat.lat];
-  map.dragPan.disable();
+  downLngLat = [event.lngLat.lng, event.lngLat.lat];
+  if (!bar.hidden && !locked() && draw.mode === "rectangle") map.dragPan.disable();
 }
 
 function onMouseMove(event: maplibregl.MapMouseEvent): void {
@@ -302,27 +397,20 @@ function onMouseMove(event: maplibregl.MapMouseEvent): void {
     moved = Math.hypot(event.point.x - downPoint.x, event.point.y - downPoint.y) > 4;
   }
   const point: Position = [event.lngLat.lng, event.lngLat.lat];
-  if (rectStart && mode === "rectangle") {
-    setDraftData(polygonFeature(rectangleRing(rectStart, point).slice(0, 4)));
-    return;
+  if (moved && draw.mode === "rectangle" && downLngLat && !draw.rectStart) {
+    draw = { ...draw, rectStart: downLngLat };
   }
-  if (draft.length && (mode === "line" || mode === "polygon")) {
-    setDraftData(mode === "line" ? lineFeature([...draft, point]) : polygonFeature([...draft, point]));
-  }
+  setDraftData(previewDraw(draw, point), draw.draft);
 }
 
 function onMouseUp(event: maplibregl.MapMouseEvent): void {
-  if (mode !== "rectangle" || !rectStart) return;
-  const end: Position = [event.lngLat.lng, event.lngLat.lat];
-  const ring = rectangleRing(rectStart, end);
-  const wide = Math.abs(ring[0][0] - ring[1][0]) > 1e-6 || Math.abs(ring[0][1] - ring[2][1]) > 1e-6;
-  if (wide) {
-    addFeature(polygonFeature(ring.slice(0, 4)));
-    cancelDraft();
-    paint();
-  } else if (!moved) {
-    map.dragPan.enable();
-  }
+  map.dragPan.enable();
+  if (draw.mode !== "rectangle" || !moved) return;
+  skipClick = true;
+  applyStep(finishRect(draw.rectStart ? draw : { ...draw, rectStart: downLngLat }, [
+    event.lngLat.lng,
+    event.lngLat.lat,
+  ]));
 }
 
 const LINE_FILTER: maplibregl.FilterSpecification = [
@@ -375,6 +463,33 @@ function addSources(): void {
       source: DRAFT,
       paint: { "line-color": DEFAULT_GEOMETRY_COLOR, "line-width": 2, "line-dasharray": [2, 1] },
     });
+    map.addLayer({
+      id: `${DRAFT}-vertex`,
+      type: "circle",
+      source: DRAFT,
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-radius": 4,
+        "circle-color": DEFAULT_GEOMETRY_COLOR,
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 1.5,
+      },
+    });
+  }
+}
+
+const GEOM_LAYER_IDS = [
+  `${SOURCE}-fill`,
+  `${SOURCE}-line`,
+  `${DRAFT}-fill`,
+  `${DRAFT}-line`,
+  `${DRAFT}-vertex`,
+];
+
+export function raiseGeometryLayers(): void {
+  if (!map?.getLayer(GEOM_LAYER_IDS[0])) return;
+  for (const id of GEOM_LAYER_IDS) {
+    if (map.getLayer(id)) map.moveLayer(id);
   }
 }
 
@@ -383,8 +498,16 @@ function setSourceData(id: string, data: FeatureCollection): void {
   source?.setData(data);
 }
 
-function setDraftData(feature: Feature | null): void {
-  setSourceData(DRAFT, feature ? { type: "FeatureCollection", features: [feature] } : EMPTY);
+function setDraftData(feature: Feature | null, vertices: Position[] = []): void {
+  const points: Feature[] = vertices.map((position) => ({
+    type: "Feature",
+    properties: { vertex: true },
+    geometry: { type: "Point", coordinates: position },
+  }));
+  setSourceData(DRAFT, {
+    type: "FeatureCollection",
+    features: feature ? [feature, ...points] : points,
+  });
 }
 
 function paintedFeatures(): Feature[] {
@@ -411,10 +534,13 @@ function paint(): void {
   if (map.getLayer(`${DRAFT}-fill`)) {
     map.setPaintProperty(`${DRAFT}-fill`, "fill-color", fill);
     map.setPaintProperty(`${DRAFT}-line`, "line-color", fill);
+    map.setPaintProperty(`${DRAFT}-vertex`, "circle-color", fill);
   }
-  if (!draft.length && !rectStart) setDraftData(null);
+  const cursor = draw.draft.at(-1) ?? draw.rectStart;
+  setDraftData(cursor ? previewDraw(draw, cursor) : null, draw.draft);
   syncMarkers(features, !locked());
   syncBar(current());
+  raiseGeometryLayers();
 }
 
 function syncBar(layer: ReturnType<typeof current>): void {
@@ -425,7 +551,12 @@ function syncBar(layer: ReturnType<typeof current>): void {
   }
   const statusEl = bar.querySelector("#geom-status");
   const lock = bar.querySelector<HTMLButtonElement>("#geom-lock");
-  if (statusEl) statusEl.textContent = modeStatus(mode);
+  const all = bar.querySelector<HTMLInputElement>("#geom-all-visible");
+  if (all && document.activeElement !== all) {
+    const layers = projectStore.getState().project.layers.filter(isGeometryLayer);
+    all.checked = layers.length > 0 && layers.every((item) => item.visible);
+  }
+  if (statusEl) statusEl.textContent = modeStatus(draw.mode);
   if (lock) {
     const on = layer?.metadata.locked === true;
     lock.classList.toggle("on", on);
@@ -433,7 +564,7 @@ function syncBar(layer: ReturnType<typeof current>): void {
     lock.textContent = on ? "🔒" : "🔓";
   }
   for (const button of bar.querySelectorAll<HTMLButtonElement>(".geom-tools button")) {
-    button.classList.toggle("active", button.dataset.mode === mode);
+    button.classList.toggle("active", button.dataset.mode === draw.mode);
   }
 }
 
@@ -452,13 +583,13 @@ function importRow(layer: { id: string; name: string; visible: boolean; geojson?
   name.type = "text";
   name.value = layer.name;
   name.spellcheck = false;
-  name.addEventListener("click", (event) => event.stopPropagation());
+  name.addEventListener("focus", () => selectImport(layer.id));
   name.addEventListener("change", () => {
     projectStore.getState().updateLayer(layer.id, { name: name.value.trim() || "geometry" });
   });
   const count = document.createElement("span");
   count.className = "geom-count";
-  count.textContent = `(${vertexCount(layer.geojson)} pts)`;
+  count.textContent = geometrySummary(layer.geojson);
   const swatch = document.createElement("input");
   swatch.type = "color";
   swatch.value = typeof layer.metadata.color === "string" ? layer.metadata.color : DEFAULT_GEOMETRY_COLOR;
@@ -468,12 +599,24 @@ function importRow(layer: { id: string; name: string; visible: boolean; geojson?
     const target = projectStore.getState().project.layers.find((item) => item.id === layer.id);
     if (target) projectStore.getState().updateLayer(layer.id, withColor(target, swatch.value));
   });
-  row.append(visible, name, count, swatch);
-  row.addEventListener("click", () => {
-    layerId = layer.id;
-    projectStore.getState().selectLayer(layer.id);
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "geom-del";
+  del.title = "delete layer";
+  del.textContent = "×";
+  del.addEventListener("click", (event) => {
+    event.stopPropagation();
+    projectStore.getState().removeLayer(layer.id);
   });
+  row.append(visible, name, count, swatch, del);
+  row.addEventListener("click", () => selectImport(layer.id));
   return row;
+}
+
+function selectImport(id: string): void {
+  if (layerId === id && projectStore.getState().selectedLayerId === id) return;
+  layerId = id;
+  projectStore.getState().selectLayer(id);
 }
 
 function syncMarkers(features: Feature[], draggable: boolean): void {
@@ -486,7 +629,17 @@ function syncMarkers(features: Feature[], draggable: boolean): void {
     const index = typeof feature.properties?.index === "number" ? feature.properties.index : -1;
     const pin = document.createElement("div");
     pin.className = "gee-pin";
+    if (owner) pin.dataset.layerId = owner;
+    pin.dataset.index = String(index);
     pin.innerHTML = `<svg viewBox="0 0 24 36" width="24" height="36" aria-hidden="true"><path fill="${fill}" d="M12 0C5.4 0 0 5.4 0 12c0 8.4 12 24 12 24s12-15.6 12-24C24 5.4 18.6 0 12 0z"/><circle cx="12" cy="12" r="4.2" fill="#fff" fill-opacity=".4"/></svg>`;
+    if (owner && index >= 0) {
+      pin.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (bar.hidden) return;
+        showContextMenu(event, [contextMenuButton("删除", () => removeHit({ layerId: owner, index }), true)]);
+      });
+    }
     const marker = new maplibregl.Marker({ element: pin, anchor: "bottom", draggable })
       .setLngLat(feature.geometry.coordinates as [number, number])
       .addTo(map);

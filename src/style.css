@@ -209,6 +209,30 @@ aside section {
   box-shadow: inset 0 -2px 0 #2563eb;
 }
 
+.row-del {
+  display: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  color: #888;
+  background: transparent;
+  line-height: 1;
+}
+
+.tree-row:hover .row-del,
+.tree-row.selected .row-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.row-del:hover {
+  color: #b42318;
+  background: transparent;
+}
+
 .tree-row input[type="checkbox"] {
   flex: none;
   width: 13px;
@@ -436,22 +460,28 @@ small {
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   align-items: flex-start;
   max-width: calc(100% - 20px);
-  padding: 4px;
-  border: 1px solid #c5ccd6;
-  border-radius: 2px;
-  background: #fff;
-  box-shadow: 0 1px 4px #0002;
+  background: transparent;
 }
 
 .geom-bar[hidden] {
   display: none;
 }
 
+.geom-tools,
+.geom-imports,
+.geom-session {
+  border: 1px solid #dadce0;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 1px 2px #0001;
+}
+
 .geom-tools {
   display: flex;
+  padding: 2px;
 }
 
 .geom-tools button,
@@ -480,22 +510,46 @@ small {
 
 .geom-imports {
   display: grid;
-  min-width: 220px;
-  border: 1px solid #d0d5dc;
-  border-radius: 2px;
-  background: #fff;
+  min-width: 240px;
+  overflow: hidden;
+}
+
+.geom-imports-head,
+#geom-new,
+.geom-import-row:not(.selected) {
+  display: none;
+}
+
+.geom-imports:hover .geom-imports-head,
+.geom-imports:focus-within .geom-imports-head {
+  display: flex;
+}
+
+.geom-imports:hover #geom-new,
+.geom-imports:focus-within #geom-new,
+.geom-imports:hover .geom-import-row,
+.geom-imports:focus-within .geom-import-row {
+  display: flex;
+}
+
+.geom-imports-head {
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  background: #1a73e8;
+  color: #fff;
 }
 
 .geom-import-row {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 4px 8px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .geom-import-row.selected {
-  background: #1a73e8;
-  color: #fff;
+  background: #e8f0fe;
 }
 
 .geom-import-row input[type="text"] {
@@ -504,11 +558,6 @@ small {
   border: 0;
   background: transparent;
   color: inherit;
-  font-style: italic;
-}
-
-.geom-import-row.selected input[type="text"] {
-  font-style: normal;
   font-weight: 600;
 }
 
@@ -516,10 +565,6 @@ small {
   color: #2e7d32;
   font-size: 12px;
   white-space: nowrap;
-}
-
-.geom-import-row.selected .geom-count {
-  color: #d7ffd9;
 }
 
 .geom-import-row input[type="color"] {
@@ -531,32 +576,52 @@ small {
   background: #fff;
 }
 
+.geom-del {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  color: #888;
+  background: transparent;
+}
+
+.geom-del:hover {
+  color: #c62828;
+  background: transparent;
+}
+
 #geom-new {
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: 0;
-  border-top: 1px solid #eee;
-  color: #c62828;
+  color: #1a73e8;
   text-align: left;
   background: transparent;
 }
 
+.geom-session {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+  background: #f8f4d8;
+}
+
 .geom-status {
-  padding: 0 8px;
+  padding: 0 8px 0 0;
   color: #334;
   font-size: 13px;
   white-space: nowrap;
 }
 
 #geom-lock.on {
-  background: #f3efe2;
+  background: #efe6c0;
 }
 
 #geom-exit {
   width: auto;
   padding: 0 8px;
   border-color: #c5ccd6;
-  background: #f4f1e6;
+  background: #fff;
 }
 
 .gee-pin {

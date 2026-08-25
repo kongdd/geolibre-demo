@@ -8,7 +8,11 @@
     "types": ["vite/client", "node"],
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@geolibre/plugins/basemap-thumbnails": ["./geolibre/basemap-thumbnails.ts"]
+    }
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "geolibre", "tests", "vite.config.ts"],
+  "exclude": ["tests/e2e"]
 }

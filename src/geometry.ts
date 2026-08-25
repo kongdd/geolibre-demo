@@ -18,7 +18,7 @@ export function nextGeometryColor(used: readonly string[]): string {
   return GEOMETRY_COLORS.find((color) => !taken.has(color)) ?? GEOMETRY_COLORS[used.length % GEOMETRY_COLORS.length];
 }
 
-export type GeometryMode = "pan" | "point" | "line" | "polygon" | "rectangle";
+export type GeometryMode = "pan" | "point" | "line" | "polygon" | "rectangle" | "tilted" | "delete";
 
 export function isGeometryLayer(layer: { metadata: { sourceKind?: unknown } }): boolean {
   return layer.metadata.sourceKind === GEOMETRY_KIND;
@@ -34,6 +34,38 @@ export function vertexCount(collection: FeatureCollection | undefined): number {
     count += countPositions(feature.geometry);
   }
   return count;
+}
+
+export function collectionKind(collection: FeatureCollection | undefined): "point" | "line" | "poly" {
+  let point = false;
+  let line = false;
+  let poly = false;
+  for (const feature of collection?.features ?? []) {
+    const type = feature.geometry?.type ?? "";
+    if (type.includes("Point")) point = true;
+    else if (type.includes("Line")) line = true;
+    else if (type.includes("Polygon")) poly = true;
+  }
+  if (poly) return "poly";
+  if (line) return "line";
+  return "point";
+}
+
+export function geometrySummary(collection: FeatureCollection | undefined): string {
+  let points = 0;
+  let lines = 0;
+  let polys = 0;
+  for (const feature of collection?.features ?? []) {
+    const type = feature.geometry?.type ?? "";
+    if (type.includes("Point")) points += 1;
+    else if (type.includes("Line")) lines += 1;
+    else if (type.includes("Polygon")) polys += 1;
+  }
+  const parts: string[] = [];
+  if (points) parts.push(`${points} pt${points === 1 ? "" : "s"}`);
+  if (lines) parts.push(`${lines} line${lines === 1 ? "" : "s"}`);
+  if (polys) parts.push(`${polys} poly`);
+  return parts.length ? `(${parts.join(", ")})` : "(empty)";
 }
 
 function countPositions(geometry: Feature["geometry"] | null): number {
@@ -73,12 +105,33 @@ export function rectangleRing(a: Position, b: Position): Position[] {
   ];
 }
 
+export function orientedRing(a: Position, b: Position, cursor: Position): Position[] | null {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-16) return null;
+  const t = ((cursor[0] - b[0]) * -dy + (cursor[1] - b[1]) * dx) / len2;
+  const ox = -dy * t;
+  const oy = dx * t;
+  if (ox * ox + oy * oy < 1e-16) return null;
+  return [a, b, [b[0] + ox, b[1] + oy], [a[0] + ox, a[1] + oy], a];
+}
+
 export function modeStatus(mode: GeometryMode): string {
   if (mode === "point") return "Point drawing.";
   if (mode === "line") return "Line drawing.";
   if (mode === "polygon") return "Polygon drawing.";
   if (mode === "rectangle") return "Rectangle drawing.";
+  if (mode === "tilted") return "Tilted rectangle.";
+  if (mode === "delete") return "Click a geometry to delete.";
   return "";
+}
+
+export function dropFeature(collection: FeatureCollection, index: number): FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: collection.features.filter((_, i) => i !== index),
+  };
 }
 
 export function createGeometryLayer(name = "geometry", color = DEFAULT_GEOMETRY_COLOR): GeoLibreLayer {

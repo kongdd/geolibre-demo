@@ -1,5 +1,6 @@
 import type { GeoLibreLayer, LayerGroup } from "@geolibre/core";
 import { button } from "./dom";
+import { collectionKind } from "./geometry";
 import { dropInsertIndex } from "./layer-order";
 import { projectStore } from "./project-store";
 import { openLayerStyle, type LayerUiActions } from "./style-editor";
@@ -7,11 +8,17 @@ import { openLayerStyle, type LayerUiActions } from "./style-editor";
 let host: HTMLDivElement;
 let actions: LayerUiActions;
 
-const contextMenu = document.createElement("div");
-contextMenu.className = "context-menu";
-contextMenu.role = "menu";
-contextMenu.hidden = true;
-document.body.append(contextMenu);
+let contextMenu: HTMLDivElement | undefined;
+
+function menu(): HTMLDivElement {
+  if (contextMenu) return contextMenu;
+  contextMenu = document.createElement("div");
+  contextMenu.className = "context-menu";
+  contextMenu.role = "menu";
+  contextMenu.hidden = true;
+  document.body.append(contextMenu);
+  return contextMenu;
+}
 
 export function bindLayerTree(el: HTMLDivElement, next: LayerUiActions): void {
   host = el;
@@ -19,11 +26,11 @@ export function bindLayerTree(el: HTMLDivElement, next: LayerUiActions): void {
 }
 
 export function closeContextMenu(): void {
-  contextMenu.hidden = true;
+  if (contextMenu) contextMenu.hidden = true;
 }
 
 export function isContextMenuOpen(): boolean {
-  return !contextMenu.hidden;
+  return Boolean(contextMenu && !contextMenu.hidden);
 }
 
 export function contextMenuButton(label: string, action: () => void, danger = false): HTMLButtonElement {
@@ -47,14 +54,11 @@ export function placeContextMenu(
   top: number,
   clamp = false,
 ): void {
-  contextMenu.replaceChildren(...items);
-  contextMenu.hidden = false;
-  contextMenu.style.left = clamp
-    ? `${Math.min(left, innerWidth - contextMenu.offsetWidth - 8)}px`
-    : `${left}px`;
-  contextMenu.style.top = clamp
-    ? `${Math.min(top, innerHeight - contextMenu.offsetHeight - 8)}px`
-    : `${top}px`;
+  const el = menu();
+  el.replaceChildren(...items);
+  el.hidden = false;
+  el.style.left = clamp ? `${Math.min(left, innerWidth - el.offsetWidth - 8)}px` : `${left}px`;
+  el.style.top = clamp ? `${Math.min(top, innerHeight - el.offsetHeight - 8)}px` : `${top}px`;
 }
 
 function openLayerContextMenu(layer: GeoLibreLayer, event: MouseEvent): void {
@@ -82,15 +86,14 @@ function openGroupContextMenu(group: LayerGroup, event: MouseEvent): void {
   ]);
 }
 
-document.addEventListener("click", closeContextMenu);
-window.addEventListener("blur", closeContextMenu);
+if (typeof document !== "undefined") {
+  document.addEventListener("click", closeContextMenu);
+  window.addEventListener("blur", closeContextMenu);
+}
 
 function legendKind(layer: GeoLibreLayer): "point" | "line" | "poly" | "raster" {
   if (layer.type !== "geojson") return "raster";
-  const type = layer.geojson?.features[0]?.geometry?.type ?? "";
-  if (type.includes("Point")) return "point";
-  if (type.includes("Line")) return "line";
-  return "poly";
+  return collectionKind(layer.geojson);
 }
 
 function createLegend(layer: GeoLibreLayer): HTMLElement {
@@ -192,8 +195,15 @@ function createLayerRow(layer: GeoLibreLayer, depth = 0): HTMLDivElement {
     ),
     createLegend(layer),
     name,
+    rowDelete("删除", () => actions.removeLayer(layer)),
   );
   return row;
+}
+
+function rowDelete(title: string, action: () => void): HTMLButtonElement {
+  const del = button("×", action, title);
+  del.className = "row-del";
+  return del;
 }
 
 export function renderLayers(): void {
@@ -237,6 +247,7 @@ export function renderLayers(): void {
       ),
       folder,
       name,
+      rowDelete("删除组", () => projectStore.getState().removeGroup(group.id)),
     );
     host.append(row);
     if (!group.collapsed) {

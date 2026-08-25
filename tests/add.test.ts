@@ -93,7 +93,7 @@ test("local vs remote src sniff", () => {
     FeatureCollection: class {},
     ImageCollection: class {},
   };
-  const bound = bindEarthEngine(fakeApi);
+  const bound = bindEarthEngine(fakeApi as never);
   assert.equal(isOfficialEe(bound.Image("USGS/SRTMGL1_003")), true);
   assert.equal(isEe(bound.Image("https://a/dem.tif")), true);
 });
@@ -142,14 +142,38 @@ test("GEE feature assets are pending geojson", () => {
   assert.equal(feat.type, "geojson");
 });
 
+test("serialized official image stores eeExpr", () => {
+  projectStore.getState().newProject("EXPR");
+  const obj = {
+    serialize: () =>
+      JSON.stringify({
+        result: "0",
+        values: {
+          "0": {
+            functionInvocationValue: {
+              functionName: "Image.load",
+              arguments: { id: { constantValue: "USGS/SRTMGL1_003" } },
+            },
+          },
+        },
+      }),
+    name: () => "Image",
+    getMap() {},
+  };
+  const layer = Map.addLayer(obj, { min: 0, max: 1 }, "SRTM");
+  assert.equal(layer.type, "xyz");
+  assert.equal(isGeeRaster(layer), true);
+  assert.equal((layer.metadata.eeExpr as { result?: string })?.result, "0");
+});
+
 test("official EE getMap becomes xyz tiles", () => {
   assert.equal(isOfficialEe({ getMap() {} }), true);
   assert.equal(isOfficialEe(ee.Image("https://a/dem.tif")), false);
-  assert.equal(tilesFromMapId({ mapid: "abc", token: "t" }), "https://earthengine.googleapis.com/map/abc/{z}/{x}/{y}?token=t");
+  assert.equal(tilesFromMapId({ mapid: "abc", token: "t" }), "https://earthengine.googleapis.com/map/abc/{z}/{x}/{y}");
   projectStore.getState().newProject("EE");
   const obj = {
-    getMap(_vis: object, callback: (map: unknown) => void) {
-      callback({ urlFormat: "https://earthengine.googleapis.com/map/x/{z}/{x}/{y}" });
+    getMap(_vis: object, callback?: (map: unknown) => void) {
+      callback?.({ urlFormat: "https://earthengine.googleapis.com/map/x/{z}/{x}/{y}" });
     },
   };
   const layer = Map.addLayer(obj, { min: 0, max: 1 }, "SRTM");

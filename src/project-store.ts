@@ -7,6 +7,7 @@ import {
   type MapViewState,
 } from "@geolibre/core";
 import { createStore } from "zustand/vanilla";
+import { sanitizeGeeProject } from "./project-io";
 
 function withId(project: GeoLibreProject): GeoLibreProject {
   return project.id ? project : { ...project, id: crypto.randomUUID() };
@@ -45,7 +46,7 @@ export interface ProjectState {
   addGroup(name: string): string;
   updateGroup(id: string, patch: Partial<LayerGroup>): void;
   removeGroup(id: string): void;
-  moveLayerToGroup(layerId: string, groupId?: string): void;
+  moveLayerToGroup(groupId: string | undefined, layerIds: string | string[]): void;
   markSaved(): void;
 }
 
@@ -58,7 +59,7 @@ export const projectStore = createStore<ProjectState>((set) => ({
     set({ project: createProject(name), isDirty: false, selectedLayerId: null }),
 
   loadProject: (project) =>
-    set({ project: withId(project), isDirty: false, selectedLayerId: null }),
+    set({ project: withId(sanitizeGeeProject(project)), isDirty: false, selectedLayerId: null }),
 
   setProjectName: (name) =>
     set((state) => {
@@ -189,18 +190,17 @@ export const projectStore = createStore<ProjectState>((set) => ({
       isDirty: true,
     })),
 
-  moveLayerToGroup: (layerId, groupId) =>
+  moveLayerToGroup: (groupId, layerIds) =>
     set((state) => {
       if (groupId && !(state.project.layerGroups ?? []).some((group) => group.id === groupId)) {
         return state;
       }
+      const ids = new Set(Array.isArray(layerIds) ? layerIds : [layerIds]);
       return {
         project: {
           ...state.project,
           layers: normalizeGroupContiguity(
-            state.project.layers.map((layer) =>
-              layer.id === layerId ? { ...layer, groupId } : layer,
-            ),
+            state.project.layers.map((layer) => (ids.has(layer.id) ? { ...layer, groupId } : layer)),
           ),
         },
         isDirty: true,

@@ -6,7 +6,7 @@ import {
 } from "maplibre-gl-raster";
 import { button, field, labeledControl } from "./dom";
 import { projectStore } from "./project-store";
-import { fetchEeBands, isGeeRaster, type EeVis } from "@geolibre/plugins/earthengine";
+import { fetchEeBandsForLayer, isGeeRaster, type EeVis } from "@geolibre/plugins/earthengine";
 import { isProjectRaster, pickRasterState } from "./raster";
 
 export type LayerUiActions = {
@@ -283,9 +283,8 @@ function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
   const vis = geeVisOf(layer);
   const names = Array.isArray(layer.metadata.eeBands) ? layer.metadata.eeBands.map(String) : [];
   const asset = typeof layer.metadata.eeAsset === "string" ? layer.metadata.eeAsset : "";
-  const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
-  if (asset && !names.length) {
-    void fetchEeBands(asset, kind)
+  if ((asset || layer.metadata.eeExpr) && !names.length) {
+    void fetchEeBandsForLayer(layer)
       .then((bands) => {
         if (projectStore.getState().selectedLayerId !== layer.id) return;
         projectStore.getState().updateLayer(layer.id, {
@@ -472,7 +471,7 @@ export function renderStyleEditor(): void {
   for (const item of project.layerGroups ?? []) group.append(new Option(item.name, item.id));
   group.value = layer.groupId ?? "";
   group.addEventListener("change", () =>
-    projectStore.getState().moveLayerToGroup(layer.id, group.value || undefined),
+    projectStore.getState().moveLayerToGroup(group.value || undefined, layer.id),
   );
 
   const opacity = document.createElement("input");

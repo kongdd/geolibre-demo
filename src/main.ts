@@ -7,7 +7,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "maplibre-gl-basemap-control/style.css";
 import "maplibre-gl-raster/style.css";
 import { ee } from "@geolibre/plugins/earthengine";
-import { addDefaultBasemaps, bindBasemaps, flushBootBasemaps } from "./basemap";
+import { bindWatershedPlugin } from "../plugins/watershed";
+import { bindBasemaps } from "./basemap";
 import { deleteRasterAsset } from "./assets";
 import { element, setStatus } from "./dom";
 import {
@@ -31,7 +32,7 @@ import { downloadProject, readProjectFile } from "./project-io";
 import { createProjectRenderer } from "./project-renderer";
 import { projectStore } from "./project-store";
 import { createRasterAdapter, isProjectRaster, rasterAssetId } from "./raster";
-import { buildSampleLayers } from "./samples";
+import { loadDemoLayers } from "./samples";
 import {
   bindStyleEditor,
   closeStyleEditor,
@@ -112,6 +113,10 @@ function removeLayer(layer: GeoLibreLayer): void {
   if (assetId) void deleteRasterAsset(assetId);
 }
 
+const watershed = bindWatershedPlugin(map, fitLayer, () => {
+  closeIdentify();
+  closeGeometryEditor();
+});
 const layerActions = { fitLayer, removeLayer };
 bindStyleEditor(styleEditor, layerActions);
 bindLegend(element<HTMLElement>("legend"));
@@ -137,6 +142,7 @@ renderUi();
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (isContextMenuOpen()) return closeContextMenu();
+  if (watershed.cancel()) return;
   const ramp = document.querySelector<HTMLElement>(".ramp-list:not([hidden])");
   if (ramp) {
     ramp.hidden = true;
@@ -233,50 +239,17 @@ function whenMapLoad(): Promise<void> {
 
 if (!projectStore.getState().project.layers.length) {
   setStatus("正在加载示例图层…");
-  void Promise.all([buildSampleLayers(), whenMapLoad().then(() => addDefaultBasemaps(basemaps))])
-    .then(async ([sample]) => {
-      const store = projectStore.getState();
-      const earthId = store.addGroup("Natural Earth");
-      for (const layer of sample.layers) layer.groupId = earthId;
-      store.addLayers([...flushBootBasemaps(), ...sample.layers]);
+  void whenMapLoad()
+    .then(loadDemoLayers)
+    .then((status) => {
       layersPanel.classList.remove("booting");
-      setStatus(sample.status);
-      try {
-        await ee.Initialize();
-        const geeId = store.addGroup("GEE");
-        const srtm = Map.addLayer(
-          ee.Image("USGS/SRTMGL1_003"),
-          { min: 0, max: 4000, palette: ["006633", "E5FFCC", "662A00", "D8D8D8", "F5F5F5"] },
-          "SRTM",
-        );
-        const et = Map.addLayer(
-          ee.ImageCollection("projects/pml_evapotranspiration/PML/OUTPUT/PML_V22a_VIIRS"),
-          {
-            min: 0,
-            max: 1600,
-            bands: ["ET"],
-            composite: "yearSum",
-            palette: [
-              "0000FF", "033FA9", "067F54", "18B80E", "70D209", "C7EE03", "FFF200",
-              "FFD200", "FFB100", "FF8000", "FF4500", "FF0A00", "CE0027", "920057", "570088",
-            ],
-          },
-          "PML-V2 ET",
-        );
-        store.moveLayerToGroup(srtm.id, geeId);
-        store.moveLayerToGroup(et.id, geeId);
-        setStatus(`${sample.status} / SRTM / PML-V2 ET`);
-      } catch (error) {
-        console.error(error);
-      }
+      setStatus(status);
     })
     .catch((error: unknown) => {
-      flushBootBasemaps();
       layersPanel.classList.remove("booting");
       setStatus(error instanceof Error ? error.message : String(error), true);
     });
 } else {
-  flushBootBasemaps();
   layersPanel.classList.remove("booting");
 }
 
@@ -320,4 +293,11 @@ window.addEventListener("beforeunload", (event) => {
   if (!projectStore.getState().isDirty) return;
   event.preventDefault();
 });
-window.addEventListener("pagehide", disposeRenderer, { once: true });
+window.addEventListener(
+  "pagehide",
+  () => {
+    watershed.dispose();
+    disposeRenderer();
+  },
+  { once: true },
+);

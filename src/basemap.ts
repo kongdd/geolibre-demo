@@ -6,10 +6,6 @@ import { basemapInsertIndex } from "./layer-order";
 import { noteLiveStyle } from "./project-renderer";
 import { projectStore } from "./project-store";
 
-const DEFAULT_BASEMAPS = ["google-satellite", "osm-standard"] as const;
-
-let boot: GeoLibreLayer[] | null = [];
-
 function dropBasemapLayers(keepId?: string): void {
   for (const layer of projectStore.getState().project.layers) {
     if (layer.metadata.sourceKind !== "maplibre-basemap-control") continue;
@@ -19,21 +15,10 @@ function dropBasemapLayers(keepId?: string): void {
 }
 
 function commitBasemapLayer(layer: GeoLibreLayer): void {
-  const basemapId = layer.metadata.basemapId;
-  if (boot) {
-    if (!boot.some((item) => item.metadata.basemapId === basemapId)) boot.push(layer);
-    return;
-  }
   const store = projectStore.getState();
-  if (store.project.layers.some((item) => item.metadata.basemapId === basemapId)) return;
+  if (store.project.layers.some((item) => item.metadata.basemapId === layer.metadata.basemapId)) return;
   store.addLayer(layer);
   store.moveLayer(layer.id, basemapInsertIndex(store.project.layers, layer.id));
-}
-
-export function flushBootBasemaps(): GeoLibreLayer[] {
-  const layers = boot ?? [];
-  boot = null;
-  return layers;
 }
 
 export function bindBasemaps(
@@ -103,11 +88,16 @@ export function bindBasemaps(
   });
   map.addControl(control, "top-left");
   thumbs = installBasemapThumbnails(control);
+  Map.addBasemap = async (ids) => {
+    for (const id of Array.isArray(ids) ? ids : [ids]) {
+      if (!control.isBasemapActive(id)) await control.addBasemap(id);
+    }
+  };
   return control;
 }
 
-export async function addDefaultBasemaps(control: BasemapControl): Promise<void> {
-  for (const id of DEFAULT_BASEMAPS) {
-    if (!control.isBasemapActive(id)) await control.addBasemap(id);
+declare global {
+  interface MapConstructor {
+    addBasemap(ids: string | readonly string[]): Promise<void>;
   }
 }

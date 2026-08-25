@@ -128,7 +128,7 @@ function dropLayerOn(sourceId: string, target: GeoLibreLayer, aboveInUi: boolean
   const store = projectStore.getState();
   const source = store.project.layers.find((layer) => layer.id === sourceId);
   if (!source || source.id === target.id) return;
-  if (source.groupId !== target.groupId) store.moveLayerToGroup(sourceId, target.groupId);
+  if (source.groupId !== target.groupId) store.moveLayerToGroup(target.groupId, sourceId);
   const index = dropInsertIndex(
     projectStore.getState().project.layers.map((layer) => layer.id),
     sourceId,

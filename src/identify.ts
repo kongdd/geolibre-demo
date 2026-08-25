@@ -1,7 +1,7 @@
 import { applyGroupEffects, type GeoLibreLayer } from "@geolibre/core";
 import { circleLayerId, fillLayerId, lineLayerId } from "@geolibre/map/headless";
 import * as maplibregl from "maplibre-gl";
-import { fetchEeSample, isGeeRaster, visFromGeeLayer } from "@geolibre/plugins/earthengine";
+import { isGeeRaster, sampleGeeLayer } from "@geolibre/plugins/earthengine";
 import { isGeometryDrawing } from "./geometry-editor";
 import { isGeometryLayer } from "./geometry";
 import { isBasemapLayer } from "./layer-order";
@@ -91,7 +91,7 @@ function syncRasterInspect(): void {
 function onClick(event: maplibregl.MapMouseEvent): void {
   if (!active || isGeometryDrawing()) return;
   const layer = topVisibleLayer();
-  if (layer && isGeeRaster(layer) && typeof layer.metadata.eeAsset === "string") {
+  if (layer && isGeeRaster(layer)) {
     void identifyGee(layer, event);
     return;
   }
@@ -108,14 +108,7 @@ async function identifyGee(layer: GeoLibreLayer, event: maplibregl.MapMouseEvent
   const scale = kind === "ImageCollection" ? 500 : 30;
   showHits([{ name: layer.name, properties: { _: "取样中…" } }], event.lngLat);
   try {
-    const values = await fetchEeSample(
-      String(layer.metadata.eeAsset),
-      visFromGeeLayer(layer),
-      kind,
-      event.lngLat.lng,
-      event.lngLat.lat,
-      scale,
-    );
+    const values = await sampleGeeLayer(layer, event.lngLat.lng, event.lngLat.lat, scale);
     if (seq !== sampleSeq) return;
     showHits([{ name: layer.name, properties: values }], event.lngLat);
   } catch (error) {

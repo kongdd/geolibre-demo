@@ -7,6 +7,7 @@ import {
 } from "@geolibre/core";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sanitizeGeeProject } from "../src/project-io";
 import { projectStore } from "../src/project-store";
 
 test("project round-trip preserves layers, groups, style and view", () => {
@@ -79,4 +80,74 @@ test("addLayers writes once", () => {
     projectStore.getState().project.layers.map((layer) => layer.id),
     ["a", "b"],
   );
+});
+
+test("moveLayerToGroup accepts one or many layer ids", () => {
+  projectStore.getState().newProject("Groups");
+  const groupId = projectStore.getState().addGroup("Demo");
+  projectStore.getState().addLayers(
+    ["a", "b"].map((id) => ({
+      id,
+      name: id,
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_LAYER_STYLE },
+      metadata: {},
+    })),
+  );
+  projectStore.getState().moveLayerToGroup(groupId, ["a", "b"]);
+  assert.deepEqual(
+    projectStore.getState().project.layers.map((layer) => layer.groupId),
+    [groupId, groupId],
+  );
+  projectStore.getState().moveLayerToGroup(undefined, "a");
+  assert.deepEqual(
+    projectStore.getState().project.layers.map((layer) => layer.groupId),
+    [undefined, groupId],
+  );
+});
+
+test("load/save drop stale Earth Engine tiles", () => {
+  projectStore.getState().newProject("GEE");
+  projectStore.getState().addLayers([
+    {
+      id: "legacy",
+      name: "Legacy map",
+      type: "xyz",
+      source: { type: "raster", tiles: ["https://earthengine.googleapis.com/map/abc/{z}/{x}/{y}"], tileSize: 256 },
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_LAYER_STYLE },
+      metadata: { eeAsset: "USGS/SRTMGL1_003", eeVisFp: '{"min":0}' },
+    },
+    {
+      id: "cloud-api",
+      name: "Cloud API map",
+      type: "xyz",
+      source: {
+        type: "raster",
+        tiles: ["https://earthengine.googleapis.com/v1/projects/demo/maps/abc/tiles/{z}/{x}/{y}"],
+        tileSize: 256,
+      },
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_LAYER_STYLE },
+      metadata: { eeAsset: "USGS/SRTMGL1_003", eeVisFp: '{"min":0}' },
+    },
+  ]);
+  const dirty = projectStore.getState().project;
+  const saved = serializeProject(sanitizeGeeProject(dirty));
+  assert.equal(saved.includes("eeVisFp"), false);
+  assert.equal(saved.includes("/map/abc/"), false);
+  assert.equal(saved.includes("/maps/abc/tiles/"), false);
+
+  projectStore.getState().loadProject(parseProject(serializeProject(dirty)));
+  for (const loaded of projectStore.getState().project.layers) {
+    assert.equal("eeVisFp" in (loaded.metadata ?? {}), false);
+    assert.deepEqual((loaded.source as { tiles?: string[] }).tiles, [
+      "https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}",
+    ]);
+  }
 });

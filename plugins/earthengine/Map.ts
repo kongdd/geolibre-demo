@@ -14,15 +14,19 @@ import { projectStore } from "../../src/project-store";
 import {
   ee,
   eeKind,
+  encodeExpression,
   fetchEeGeoJSON,
   getMapResult,
   isEe,
   isLocalImageSrc,
   isLocalVectorSrc,
   isOfficialEe,
+  officialEe,
+  runEe,
   tilesFromMapId,
   viewBounds,
 } from "./ee";
+import { annualEt } from "./PMLV2";
 import { createLocalRasterLayer, createRemoteRasterLayer } from "../../src/raster";
 import { createVectorLayer, readVectorFile } from "../../src/vector";
 
@@ -121,7 +125,7 @@ function applyOpts(layer: GeoLibreLayer, opts: AddOpts): GeoLibreLayer {
   layer.style = style;
   if (opts.colormap || opts.zoom || opts.rescale || opts.bands) {
     const prev = layer.metadata.rasterState;
-    const rasterState =
+    const rasterState: Record<string, unknown> =
       prev && typeof prev === "object" && !Array.isArray(prev) ? { ...prev } : {};
     if (opts.colormap) rasterState.colormap = opts.colormap;
     if (opts.rescale) rasterState.rescale = opts.rescale;
@@ -286,6 +290,70 @@ function paintOfficial(obj: ee.Computed, vis: VisParams | null | undefined, opts
   return paintTiles("Earth Engine", opts, async () => tilesFromMapId(await getMapResult(obj, vis ?? {})));
 }
 
+function simpleAssetId(obj: ee.Computed): string | undefined {
+  const id = (obj as { args?: { id?: unknown } }).args?.id;
+  return typeof id === "string" && /^[A-Za-z0-9_./-]+$/.test(id) ? id : undefined;
+}
+
+function paintEeComputed(obj: ee.Computed, vis: VisParams | null | undefined, opts: AddOpts): GeoLibreLayer {
+  const api = officialEe();
+  let graph = obj;
+  if (vis?.composite === "yearSum" && api) {
+    graph = annualEt(api as never, obj as never, vis.bands?.length ? String(vis.bands[0]) : "ET", vis.year) as ee.Computed;
+  }
+  const expr = encodeExpression(graph);
+  const kind = typeof obj.name === "function" && obj.name() === "ImageCollection" ? "ImageCollection" : "Image";
+  const layer = xyzOf("https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}", {
+    ...opts,
+    name: opts.name || simpleAssetId(obj) || "Earth Engine",
+  });
+  layer.metadata = {
+    ...layer.metadata,
+    eeExpr: expr,
+    eeAsset: simpleAssetId(obj),
+    eeKind: kind,
+    eeVis: {
+      min: vis?.min,
+      max: vis?.max,
+      palette: vis?.palette,
+      bands: vis?.bands,
+    },
+  };
+  return push(layer);
+}
+
+function paintOfficialVector(obj: ee.Computed, opts: AddOpts, existing: GeoLibreLayer[]): GeoLibreLayer {
+  const layer = applyOpts(
+    createVectorLayer(opts.name || simpleAssetId(obj) || "Earth Engine", { type: "FeatureCollection", features: [] }, existing),
+    opts,
+  );
+  layer.metadata = {
+    ...layer.metadata,
+    eeExpr: encodeExpression(obj),
+    eeAsset: simpleAssetId(obj),
+    eeKind: typeof obj.name === "function" && obj.name() === "Feature" ? "Feature" : "FeatureCollection",
+  };
+  push(layer);
+  const box = viewBounds();
+  if (!box) return layer;
+  const api = officialEe() as { Geometry?: { Rectangle: new (box: number[], proj: null, geodesic: boolean) => unknown } } | null;
+  let table: ee.Computed & { filterBounds?: (geom: unknown) => ee.Computed; limit?: (n: number) => ee.Computed } = obj;
+  if (api?.Geometry && typeof table.filterBounds === "function") {
+    table = table.filterBounds(new api.Geometry.Rectangle(box, null, false));
+  }
+  if (typeof table.limit === "function") table = table.limit(2000);
+  void runEe(table, "getInfo")
+    .then((data) => {
+      const geojson =
+        data && typeof data === "object" && (data as { type?: string }).type === "Feature"
+          ? { type: "FeatureCollection" as const, features: [data as Feature] }
+          : asCollection(data);
+      projectStore.getState().updateLayer(layer.id, { geojson });
+    })
+    .catch((error) => console.error(error));
+  return layer;
+}
+
 function paintEeAsset(
   asset: string,
   vis: VisParams | null | undefined,
@@ -341,6 +409,13 @@ export function addLayer(
 ): GeoLibreLayer {
   const opts = visToOpts(vis, name, shown, opacity);
   const existing = projectStore.getState().project.layers;
+  if (isOfficialEe(obj) && typeof obj.serialize === "function") {
+    const kind = typeof obj.name === "function" ? obj.name() : "";
+    if (kind === "Feature" || kind === "FeatureCollection" || kind === "Geometry") {
+      return paintOfficialVector(obj, opts, existing);
+    }
+    return paintEeComputed(obj, vis, opts);
+  }
   if (isOfficialEe(obj)) return paintOfficial(obj, vis, opts);
   const eeType = eeKind(obj);
   if (eeType === "Feature" && isEe(obj) && obj.eeType === "Feature") {

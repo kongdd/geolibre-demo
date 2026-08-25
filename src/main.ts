@@ -10,7 +10,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "maplibre-gl-basemap-control/style.css";
 import "maplibre-gl-raster/style.css";
 import "./maplibre-worker";
-import { installBasemapThumbnails } from "./basemap-preview";
+import { installBasemapThumbnails } from "@geolibre/plugins/basemap-thumbnails";
 import { basemapInsertIndex } from "./layer-order";
 import { deleteRasterAsset } from "./assets";
 import {

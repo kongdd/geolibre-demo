@@ -18,6 +18,9 @@ export default defineConfig({
       "@geolibre/map/headless": fileURLToPath(
         new URL("../../packages/map/src/headless.ts", import.meta.url),
       ),
+      "@geolibre/plugins/basemap-thumbnails": fileURLToPath(
+        new URL("./geolibre/basemap-thumbnails.ts", import.meta.url),
+      ),
     },
     dedupe: ["maplibre-gl"],
   },

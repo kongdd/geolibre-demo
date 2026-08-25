@@ -1,0 +1,12 @@
+# against 2026-08-24 38ce4cd basemap-thumbnails.ts — line numbers drift after upstream edits
+--- basemap-thumbnails.ts
++++ basemap-thumbnails.ts
+@@ -332,7 +332,7 @@ function markSkipped(id: string): void {
+   });
+ }
+ 
+-export function installBasemapThumbnails(control: BasemapControl): {
++export function installBasemapThumbnails(control: Pick<BasemapControl, "getBasemaps">): {
+   dispose(): void;
+   pause(): void;
+ } {

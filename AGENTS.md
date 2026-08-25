@@ -42,7 +42,7 @@ UI / 文件 → projectStore → createProjectRenderer
 | `src/assets.ts` | 本地栅格 IndexedDB |
 | `src/geometry.ts` / `geometry-editor.ts` | 手绘几何 |
 | `src/style-editor.ts` | 图层样式 |
-| `src/basemap-preview.ts` | 底图缩略图 |
+| `geolibre/basemap-thumbnails.ts` | 底图缩略图；`./sync_geolibre.sh` 从主仓复制 |
 
 栅格（`project-raster`）与几何（`gee-geometry`）不走 `createLayerSync`。
 

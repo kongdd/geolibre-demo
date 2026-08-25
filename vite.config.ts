@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import { eeAuthPlugin } from "./plugins/ee-auth-plugin";
+import { eeAuthPlugin } from "./plugins/earthengine/plugin.ts";
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
@@ -25,6 +25,9 @@ export default defineConfig({
       ),
       "@geolibre/plugins/basemap-thumbnails": fileURLToPath(
         new URL("./plugins/basemap-thumbnails.ts", import.meta.url),
+      ),
+      "@geolibre/plugins/earthengine": fileURLToPath(
+        new URL("./plugins/earthengine/index.ts", import.meta.url),
       ),
     },
     dedupe: ["maplibre-gl"],

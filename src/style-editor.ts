@@ -6,7 +6,7 @@ import {
 } from "maplibre-gl-raster";
 import { button, field, labeledControl } from "./dom";
 import { projectStore } from "./project-store";
-import { fetchEeBands, isGeeRaster, type EeVis } from "./earthengine";
+import { fetchEeBands, isGeeRaster, type EeVis } from "@geolibre/plugins/earthengine";
 import { isProjectRaster, pickRasterState } from "./raster";
 
 export type LayerUiActions = {
@@ -21,6 +21,7 @@ const COLORMAPS = [...COLORMAP_OPTIONS].sort((a, b) =>
 let host: HTMLElement;
 let actions: LayerUiActions;
 let styleEditorOpen = false;
+let geeDraft: { id: string; vis: EeVis } | null = null;
 
 export function bindStyleEditor(el: HTMLElement, next: LayerUiActions): void {
   host = el;
@@ -32,6 +33,7 @@ export function isStyleEditorOpen(): boolean {
 }
 
 export function openLayerStyle(layerId: string): void {
+  if (geeDraft?.id !== layerId) geeDraft = null;
   styleEditorOpen = true;
   projectStore.getState().selectLayer(layerId);
   renderStyleEditor();
@@ -51,6 +53,45 @@ function applyRampSwatch(el: HTMLElement, name: string, reversed: boolean): void
     ? `0 ${(option.rowIndex / (COLORMAP_ROW_COUNT - 1)) * 100}%`
     : "0 0";
   el.style.transform = reversed ? "scaleX(-1)" : "";
+}
+
+let colormapImage: Promise<HTMLImageElement> | null = null;
+
+function colormapSprite(): Promise<HTMLImageElement> {
+  if (!colormapImage) {
+    colormapImage = new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("colormap sprite"));
+      image.src = colormapsPngUrl;
+    });
+  }
+  return colormapImage;
+}
+
+function colormapStops(name: string, n = 16): Promise<string[]> {
+  const option = COLORMAP_OPTIONS.find((item) => item.name === name);
+  if (!option) return Promise.resolve([]);
+  return colormapSprite().then((image) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = n;
+    canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+    const row = image.height / COLORMAP_ROW_COUNT;
+    ctx.drawImage(image, 0, option.rowIndex * row, image.width, row, 0, 0, n, 1);
+    const data = ctx.getImageData(0, 0, n, 1).data;
+    const colors: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const o = i * 4;
+      colors.push(
+        [data[o], data[o + 1], data[o + 2]]
+          .map((value) => (value ?? 0).toString(16).padStart(2, "0"))
+          .join(""),
+      );
+    }
+    return colors;
+  });
 }
 
 function colormapPicker(
@@ -150,6 +191,28 @@ function paletteOf(vis: EeVis): string[] {
   return ["000000", "ffffff"];
 }
 
+function mixHex(a: string, b: string, t: number): string {
+  const pa = hex6(a);
+  const pb = hex6(b);
+  const ch = (i: number) => {
+    const va = Number.parseInt(pa.slice(i, i + 2), 16);
+    const vb = Number.parseInt(pb.slice(i, i + 2), 16);
+    return Math.round(va + (vb - va) * t).toString(16).padStart(2, "0");
+  };
+  return `${ch(0)}${ch(2)}${ch(4)}`;
+}
+
+function rampStops(colors: string[], n = 16): string[] {
+  if (colors.length >= n) return colors.slice(0, n);
+  if (!colors.length) return Array.from({ length: n }, () => "000000");
+  if (colors.length === 1) return Array.from({ length: n }, () => hex6(colors[0] ?? "000000"));
+  return Array.from({ length: n }, (_, i) => {
+    const x = (i / (n - 1)) * (colors.length - 1);
+    const lo = Math.floor(x);
+    return mixHex(colors[lo] ?? "000000", colors[Math.min(lo + 1, colors.length - 1)] ?? "ffffff", x - lo);
+  });
+}
+
 function commitGeeVis(layer: GeoLibreLayer, vis: EeVis): void {
   const prev =
     layer.metadata.rasterState && typeof layer.metadata.rasterState === "object"
@@ -206,11 +269,18 @@ function bandSelect(names: string[], value: string, onChange: (value: string) =>
   return select;
 }
 
-function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
+function geeVisOf(layer: GeoLibreLayer): EeVis {
+  if (geeDraft?.id === layer.id) return geeDraft.vis;
   const vis =
     layer.metadata.eeVis && typeof layer.metadata.eeVis === "object"
       ? ({ ...layer.metadata.eeVis } as EeVis)
       : {};
+  geeDraft = { id: layer.id, vis };
+  return vis;
+}
+
+function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
+  const vis = geeVisOf(layer);
   const names = Array.isArray(layer.metadata.eeBands) ? layer.metadata.eeBands.map(String) : [];
   const asset = typeof layer.metadata.eeAsset === "string" ? layer.metadata.eeAsset : "";
   const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
@@ -226,9 +296,16 @@ function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
   }
   const current = (vis.bands ?? []).map(String);
   const rgb = current.length >= 3;
-  const colorMode = vis.gamma != null && !(vis.palette && (Array.isArray(vis.palette) ? vis.palette.length : vis.palette)) ? "gamma" : "palette";
+  const colorMode = vis.colormap
+    ? "colormap"
+    : vis.gamma != null && !vis.palette
+      ? "gamma"
+      : "palette";
 
-  const apply = (patch: EeVis) => commitGeeVis(layer, { ...vis, ...patch });
+  const apply = (patch: EeVis, redraw = false) => {
+    geeDraft = { id: layer.id, vis: { ...vis, ...patch } };
+    if (redraw) renderStyleEditor();
+  };
 
   const title = document.createElement("div");
   title.className = "gee-vis-title";
@@ -243,10 +320,13 @@ function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
     rgb ? "3" : "1",
     (value) => {
       const first = current[0] || names[0] || "0";
-      apply({
-        bands: value === "3" ? [first, current[1] || first, current[2] || first] : [first],
-        palette: value === "3" ? undefined : vis.palette ?? paletteOf(vis),
-      });
+      apply(
+        {
+          bands: value === "3" ? [first, current[1] || first, current[2] || first] : [first],
+          palette: value === "3" ? undefined : vis.palette ?? paletteOf(vis),
+        },
+        true,
+      );
     },
   );
 
@@ -296,11 +376,18 @@ function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
         [
           ["gamma", "Gamma"],
           ["palette", "Palette"],
+          ["colormap", "Colormap"],
         ],
         colorMode,
         (value) => {
-          if (value === "gamma") apply({ gamma: vis.gamma ?? 1, palette: undefined });
-          else apply({ gamma: undefined, palette: paletteOf({ ...vis, palette: vis.palette }) });
+          if (value === "gamma") apply({ gamma: vis.gamma ?? 1, palette: undefined, colormap: undefined }, true);
+          else if (value === "palette") apply({ gamma: undefined, colormap: undefined, palette: paletteOf(vis) }, true);
+          else {
+            const name = vis.colormap && COLORMAPS.some((item) => item.name === vis.colormap) ? vis.colormap : "viridis";
+            void colormapStops(name)
+              .then((stops) => apply({ gamma: undefined, colormap: name, palette: stops.length ? stops : paletteOf(vis) }, true))
+              .catch((error) => console.error(error));
+          }
         },
       ),
     );
@@ -312,32 +399,50 @@ function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
       gamma.value = String(vis.gamma ?? 1);
       gamma.addEventListener("change", () => {
         const value = Number(gamma.value);
-        apply({ gamma: value > 0 ? value : 1, palette: undefined });
+        apply({ gamma: value > 0 ? value : 1, palette: undefined, colormap: undefined });
       });
       extras.push(labeledControl("Gamma", gamma));
+    } else if (colorMode === "colormap") {
+      extras.push(
+        field(
+          "Colormap",
+          colormapPicker(vis.colormap && COLORMAPS.some((item) => item.name === vis.colormap) ? vis.colormap : "viridis", false, (name) => {
+            void colormapStops(name)
+              .then((stops) => {
+                if (stops.length) apply({ palette: stops, colormap: name, gamma: undefined });
+              })
+              .catch((error) => console.error(error));
+          }),
+        ),
+      );
     } else {
       const chips = document.createElement("div");
       chips.className = "gee-palette";
-      const colors = paletteOf(vis);
+      const colors = rampStops(paletteOf(vis));
       for (const [index, color] of colors.entries()) {
+        const cell = document.createElement("label");
+        cell.className = "gee-swatch";
+        cell.style.background = `#${color}`;
+        cell.title = `#${color}`;
         const input = document.createElement("input");
         input.type = "color";
-        input.value = `#${hex6(color)}`;
+        input.value = `#${color}`;
         input.addEventListener("change", () => {
           const next = [...colors];
           next[index] = hex6(input.value);
-          apply({ palette: next, gamma: undefined });
+          apply({ palette: next, gamma: undefined, colormap: undefined });
         });
-        chips.append(input);
+        cell.append(input);
+        chips.append(cell);
       }
-      chips.append(
-        button("+", () => apply({ palette: [...colors, colors[colors.length - 1] ?? "ffffff"], gamma: undefined })),
-      );
       extras.push(field("Palette", chips));
     }
   }
 
-  return [title, mode, field("Bands", bandRow), field("Range", range), ...extras];
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "editor-actions";
+  actionsRow.append(button("Apply", () => commitGeeVis(layer, geeVisOf(layer))));
+  return [title, mode, field("Bands", bandRow), field("Range", range), ...extras, actionsRow];
 }
 
 export function renderStyleEditor(): void {
@@ -380,11 +485,21 @@ export function renderStyleEditor(): void {
     projectStore.getState().updateLayer(layer.id, { opacity: Number(opacity.value) }),
   );
 
+  const legend = document.createElement("input");
+  legend.type = "checkbox";
+  legend.checked = layer.metadata.showLegend === true;
+  legend.addEventListener("change", () => {
+    projectStore.getState().updateLayer(layer.id, {
+      metadata: { ...layer.metadata, showLegend: legend.checked },
+    });
+  });
+
   host.append(
     heading,
     labeledControl("Name", name),
     labeledControl("Group", group),
     labeledControl(`Opacity ${Math.round(layer.opacity * 100)}%`, opacity),
+    labeledControl("Legend", legend),
   );
 
   if (layer.type === "geojson") {
@@ -470,6 +585,7 @@ export function renderStyleEditor(): void {
     );
   } else if (isGeeRaster(layer)) {
     host.append(...geeVisEditor(layer));
+    return;
   }
 
   const row = document.createElement("div");

@@ -1,5 +1,5 @@
 import type { GeoLibreLayer } from "@geolibre/core";
-import { layersOf } from "./earthengine";
+import { layersOf } from "@geolibre/plugins/earthengine";
 
 const SAMPLE = {
   countries:

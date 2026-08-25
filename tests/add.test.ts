@@ -17,7 +17,7 @@ import {
   sniff,
   tilesFromMapId,
   visToOpts,
-} from "../src/earthengine";
+} from "@geolibre/plugins/earthengine";
 import { isGeometryLayer } from "../src/geometry";
 import { projectStore } from "../src/project-store";
 
@@ -110,6 +110,9 @@ test("eeMapUrl encodes GEE asset", () => {
   const gamma = eeMapUrl("USGS/SRTMGL1_003", { min: 0, max: 4000, gamma: 1.2 });
   assert.match(gamma, /gamma=1.2/);
   assert.equal(gamma.includes("palette="), false);
+  const yearly = eeMapUrl("projects/pml_evapotranspiration/PML/OUTPUT/PML_V22a_VIIRS", { bands: ["ET"], composite: "yearSum" }, "ImageCollection");
+  assert.match(yearly, /composite=yearSum/);
+  assert.match(yearly, /bands=ET/);
 });
 
 test("GEE asset image is pending xyz", () => {

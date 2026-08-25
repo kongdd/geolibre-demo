@@ -6,7 +6,7 @@ import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import "maplibre-gl/dist/maplibre-gl.css";
 import "maplibre-gl-basemap-control/style.css";
 import "maplibre-gl-raster/style.css";
-import { ee } from "./earthengine";
+import { ee } from "@geolibre/plugins/earthengine";
 import { addDefaultBasemaps, bindBasemaps, flushBootBasemaps } from "./basemap";
 import { deleteRasterAsset } from "./assets";
 import { element, setStatus } from "./dom";
@@ -18,6 +18,7 @@ import {
   openGeometryEditor,
 } from "./geometry-editor";
 import { bindIdentify, closeIdentify } from "./identify";
+import { bindLegend } from "./legend";
 import {
   bindLayerTree,
   closeContextMenu,
@@ -113,6 +114,7 @@ function removeLayer(layer: GeoLibreLayer): void {
 
 const layerActions = { fitLayer, removeLayer };
 bindStyleEditor(styleEditor, layerActions);
+bindLegend(element<HTMLElement>("legend"));
 bindLayerTree(layersPanel, layerActions);
 bindGeometryEditor(map, element("geom-bar"));
 bindIdentify(map, element("identify"), rasterAdapter);
@@ -234,22 +236,36 @@ if (!projectStore.getState().project.layers.length) {
   void Promise.all([buildSampleLayers(), whenMapLoad().then(() => addDefaultBasemaps(basemaps))])
     .then(async ([sample]) => {
       const store = projectStore.getState();
-      const groupId = store.addGroup("Natural Earth");
-      for (const layer of sample.layers) layer.groupId = groupId;
+      const earthId = store.addGroup("Natural Earth");
+      for (const layer of sample.layers) layer.groupId = earthId;
       store.addLayers([...flushBootBasemaps(), ...sample.layers]);
       layersPanel.classList.remove("booting");
       setStatus(sample.status);
       try {
         await ee.Initialize();
-        store.moveLayerToGroup(
-          Map.addLayer(
-            ee.Image("USGS/SRTMGL1_003"),
-            { min: 0, max: 4000, palette: ["006633", "E5FFCC", "662A00", "D8D8D8", "F5F5F5"] },
-            "SRTM",
-          ).id,
-          groupId,
+        const geeId = store.addGroup("GEE");
+        const srtm = Map.addLayer(
+          ee.Image("USGS/SRTMGL1_003"),
+          { min: 0, max: 4000, palette: ["006633", "E5FFCC", "662A00", "D8D8D8", "F5F5F5"] },
+          "SRTM",
         );
-        setStatus(`${sample.status} / SRTM`);
+        const et = Map.addLayer(
+          ee.ImageCollection("projects/pml_evapotranspiration/PML/OUTPUT/PML_V22a_VIIRS"),
+          {
+            min: 0,
+            max: 1600,
+            bands: ["ET"],
+            composite: "yearSum",
+            palette: [
+              "0000FF", "033FA9", "067F54", "18B80E", "70D209", "C7EE03", "FFF200",
+              "FFD200", "FFB100", "FF8000", "FF4500", "FF0A00", "CE0027", "920057", "570088",
+            ],
+          },
+          "PML-V2 ET",
+        );
+        store.moveLayerToGroup(srtm.id, geeId);
+        store.moveLayerToGroup(et.id, geeId);
+        setStatus(`${sample.status} / SRTM / PML-V2 ET`);
       } catch (error) {
         console.error(error);
       }

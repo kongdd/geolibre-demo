@@ -4,15 +4,17 @@
     "useDefineForClassFields": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "node"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "paths": {
-      "@geolibre/plugins/basemap-thumbnails": ["plugins/basemap-thumbnails.ts"]
+      "@geolibre/plugins/basemap-thumbnails": ["./plugins/basemap-thumbnails.ts"],
+      "@geolibre/plugins/earthengine": ["./plugins/earthengine/index.ts"]
     }
   },
-  "include": ["src", "geolibre", "tests", "vite.config.ts", "plugins/basemap-thumbnails.ts"],
+  "include": ["src", "geolibre", "tests", "vite.config.ts", "plugins"],
   "exclude": ["tests/e2e"]
 }

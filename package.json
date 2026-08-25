@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "vite --configLoader native",
+    "build": "tsc --noEmit && vite build --configLoader native",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:e2e": "xvfb-run -a node --import tsx tests/e2e/geometry-e2e.ts",
-    "preview": "vite preview"
+    "preview": "vite preview --configLoader native"
   },
   "dependencies": {
     "@geolibre/core": "^2.7.0",

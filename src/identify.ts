@@ -1,8 +1,10 @@
-import type { GeoLibreLayer } from "@geolibre/core";
+import { applyGroupEffects, type GeoLibreLayer } from "@geolibre/core";
 import { circleLayerId, fillLayerId, lineLayerId } from "@geolibre/map/headless";
 import * as maplibregl from "maplibre-gl";
+import { fetchEeSample, isGeeRaster, visFromGeeLayer } from "@geolibre/plugins/earthengine";
 import { isGeometryDrawing } from "./geometry-editor";
 import { isGeometryLayer } from "./geometry";
+import { isBasemapLayer } from "./layer-order";
 import { projectStore } from "./project-store";
 import { isProjectRaster, type RasterAdapter } from "./raster";
 
@@ -13,6 +15,7 @@ let button: HTMLButtonElement;
 let raster: RasterAdapter;
 let active = false;
 let popup: maplibregl.Popup | null = null;
+let sampleSeq = 0;
 
 export function closeIdentify(): boolean {
   if (!active) return false;
@@ -32,7 +35,10 @@ export function styleIdsFor(layer: {
 
 export function formatIdentifyValue(value: unknown): string {
   if (value == null) return "";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  }
+  if (typeof value === "string" || typeof value === "boolean") {
     return String(value);
   }
   try {
@@ -66,18 +72,15 @@ function setIdentify(next: boolean): void {
   if (!active) closePopup();
 }
 
+export function topVisibleLayer(): GeoLibreLayer | undefined {
+  const { project } = projectStore.getState();
+  const layers = applyGroupEffects(project.layers, project.layerGroups ?? []);
+  return [...layers].reverse().find((layer) => layer.visible && !isBasemapLayer(layer) && layer.opacity > 0);
+}
+
 function syncRasterInspect(): void {
-  if (!active) {
-    raster.setInspect(false);
-    return;
-  }
-  const { project, selectedLayerId } = projectStore.getState();
-  const selected = project.layers.find((layer) => layer.id === selectedLayerId);
-  const target =
-    selected && isProjectRaster(selected) && selected.visible
-      ? selected
-      : [...project.layers].reverse().find((layer) => isProjectRaster(layer) && layer.visible);
-  if (!target) {
+  const target = active ? topVisibleLayer() : undefined;
+  if (!target || !isProjectRaster(target)) {
     raster.setInspect(false);
     return;
   }
@@ -87,15 +90,48 @@ function syncRasterInspect(): void {
 
 function onClick(event: maplibregl.MapMouseEvent): void {
   if (!active || isGeometryDrawing()) return;
-  const hits = collectHits(map, event.point);
-  if (!hits.length) {
-    closePopup();
+  const layer = topVisibleLayer();
+  if (layer && isGeeRaster(layer) && typeof layer.metadata.eeAsset === "string") {
+    void identifyGee(layer, event);
     return;
   }
+  const feature = layer ? hitFor(map, event.point, layer) : undefined;
+  showHits(
+    feature && layer ? [{ name: layer.name, properties: publicProperties(feature.properties) }] : [],
+    event.lngLat,
+  );
+}
+
+async function identifyGee(layer: GeoLibreLayer, event: maplibregl.MapMouseEvent): Promise<void> {
+  const seq = ++sampleSeq;
+  const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
+  const scale = kind === "ImageCollection" ? 500 : 30;
+  showHits([{ name: layer.name, properties: { _: "取样中…" } }], event.lngLat);
+  try {
+    const values = await fetchEeSample(
+      String(layer.metadata.eeAsset),
+      visFromGeeLayer(layer),
+      kind,
+      event.lngLat.lng,
+      event.lngLat.lat,
+      scale,
+    );
+    if (seq !== sampleSeq) return;
+    showHits([{ name: layer.name, properties: values }], event.lngLat);
+  } catch (error) {
+    if (seq !== sampleSeq) return;
+    showHits(
+      [{ name: layer.name, properties: { error: error instanceof Error ? error.message : String(error) } }],
+      event.lngLat,
+    );
+  }
+}
+
+function showHits(hits: IdentifyHit[], lngLat: maplibregl.LngLatLike): void {
   closePopup();
   popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
-    .setLngLat(event.lngLat)
-    .setDOMContent(renderHits(hits))
+    .setLngLat(lngLat)
+    .setDOMContent(renderHits(hits, maplibregl.LngLat.convert(lngLat), map.getZoom()))
     .addTo(map);
 }
 
@@ -107,16 +143,6 @@ function closePopup(): void {
 interface IdentifyHit {
   name: string;
   properties: Record<string, unknown>;
-}
-
-function collectHits(target: maplibregl.Map, point: maplibregl.PointLike): IdentifyHit[] {
-  const hits: IdentifyHit[] = [];
-  for (const layer of [...projectStore.getState().project.layers].reverse()) {
-    if (!layer.visible) continue;
-    const feature = hitFor(target, point, layer);
-    if (feature) hits.push({ name: layer.name, properties: publicProperties(feature.properties) });
-  }
-  return hits;
 }
 
 function hitFor(
@@ -144,9 +170,28 @@ function publicProperties(
   return next;
 }
 
-function renderHits(hits: IdentifyHit[]): HTMLElement {
+function appendTable(root: HTMLElement, rows: Array<[string, unknown]>): void {
+  const table = document.createElement("table");
+  for (const [key, value] of rows) {
+    const row = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = key;
+    const td = document.createElement("td");
+    td.textContent = formatIdentifyValue(value);
+    row.append(th, td);
+    table.append(row);
+  }
+  root.append(table);
+}
+
+function renderHits(hits: IdentifyHit[], lngLat: maplibregl.LngLat, zoom: number): HTMLElement {
   const root = document.createElement("div");
   root.className = "identify-popup";
+  appendTable(root, [
+    ["lon", lngLat.lng.toFixed(6)],
+    ["lat", lngLat.lat.toFixed(6)],
+    ["zoom", String(Math.round(zoom))],
+  ]);
   for (const hit of hits) {
     const title = document.createElement("div");
     title.className = "identify-title";
@@ -160,17 +205,7 @@ function renderHits(hits: IdentifyHit[]): HTMLElement {
       root.append(empty);
       continue;
     }
-    const table = document.createElement("table");
-    for (const [key, value] of entries) {
-      const row = document.createElement("tr");
-      const th = document.createElement("th");
-      th.textContent = key;
-      const td = document.createElement("td");
-      td.textContent = formatIdentifyValue(value);
-      row.append(th, td);
-      table.append(row);
-    }
-    root.append(table);
+    appendTable(root, entries);
   }
   return root;
 }

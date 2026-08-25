@@ -33,7 +33,6 @@ UI / 文件 → projectStore → createProjectRenderer
 | --- | --- |
 | `src/main.ts` | 组装 UI、文件入口、MapLibre 6 `transform` shim |
 | `src/basemap.ts` | 底图控件与默认底图 |
-| `src/earthengine/` | GEE 对接：`ee.ts`（`ee.Image` / `ee.Initialize`）、`Map.ts`（`Map.addLayer`） |
 | `src/samples.ts` | 空项目示例图层 |
 | `src/project-store.ts` | Zustand store；Project 唯一真相 |
 | `src/project-renderer.ts` | store → 地图 |
@@ -46,7 +45,7 @@ UI / 文件 → projectStore → createProjectRenderer
 | `src/geometry.ts` / `geometry-editor.ts` | 手绘几何 |
 | `src/style-editor.ts` | 图层样式 |
 | `plugins/basemap-thumbnails.ts` | 底图缩略图；`./sync_geolibre.sh` 从主仓复制 |
-| `plugins/ee-auth-plugin.ts` | Vite 插件：Node `ee-auth` → `/api/ee/*` |
+| `plugins/earthengine/` | GEE（`@geolibre/plugins/earthengine`）：`ee.ts` / `Map.ts`，`plugin.ts` → `/api/ee/*` |
 
 栅格（`project-raster`）与几何（`gee-geometry`）不走 `createLayerSync`。
 

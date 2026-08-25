@@ -9,8 +9,8 @@ import {
   pointFeature,
   polygonFeature,
   rectangleRing,
-} from "../geometry";
-import { projectStore } from "../project-store";
+} from "../../src/geometry";
+import { projectStore } from "../../src/project-store";
 import {
   ee,
   eeKind,
@@ -23,8 +23,8 @@ import {
   tilesFromMapId,
   viewBounds,
 } from "./ee";
-import { createLocalRasterLayer, createRemoteRasterLayer } from "../raster";
-import { createVectorLayer, readVectorFile } from "../vector";
+import { createLocalRasterLayer, createRemoteRasterLayer } from "../../src/raster";
+import { createVectorLayer, readVectorFile } from "../../src/vector";
 
 export type AddKind = "geojson" | "xyz" | "cog";
 export type AddSrc = string | File | FeatureCollection | Feature | Geometry | ee.Object | ee.Computed;
@@ -59,6 +59,9 @@ export type VisParams = {
   max?: number;
   bands?: Array<string | number>;
   opacity?: number;
+  composite?: "yearSum";
+  year?: number;
+  scale?: number;
 };
 
 export function sniff(src: AddSrc, hint?: AddKind): AddKind {
@@ -297,7 +300,15 @@ function paintEeAsset(
     ...layer.metadata,
     eeAsset: asset,
     eeKind: kind,
-    eeVis: { min: vis?.min, max: vis?.max, palette: vis?.palette, bands: vis?.bands },
+    eeVis: {
+      min: vis?.min,
+      max: vis?.max,
+      palette: vis?.palette,
+      bands: vis?.bands,
+      composite: vis?.composite,
+      year: vis?.year,
+      scale: vis?.scale,
+    },
   };
   return push(layer);
 }

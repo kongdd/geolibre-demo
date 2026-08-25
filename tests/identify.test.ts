@@ -18,7 +18,8 @@ test("styleIdsFor maps geojson and geometry layers", () => {
 
 test("formatIdentifyValue stringifies primitives and objects", () => {
   assert.equal(formatIdentifyValue(null), "");
-  assert.equal(formatIdentifyValue(12.5), "12.5");
+  assert.equal(formatIdentifyValue(12.5), "12.5000");
+  assert.equal(formatIdentifyValue(578.96000000000002), "578.9600");
   assert.equal(formatIdentifyValue(true), "true");
   assert.equal(formatIdentifyValue("China"), "China");
   assert.equal(formatIdentifyValue({ a: 1 }), '{"a":1}');

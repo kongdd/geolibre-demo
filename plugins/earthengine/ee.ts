@@ -3,7 +3,7 @@ import type {
   FeatureCollection as GeoJSONFeatureCollection,
   Geometry,
 } from "geojson";
-import { projectStore } from "../project-store";
+import { projectStore } from "../../src/project-store";
 
 export namespace ee {
   export type Type = "Feature" | "FeatureCollection" | "Image" | "ImageCollection";
@@ -144,6 +144,10 @@ export type EeVis = {
   palette?: string | string[];
   bands?: Array<string | number>;
   gamma?: number;
+  colormap?: string;
+  composite?: "yearSum";
+  year?: number;
+  scale?: number;
 };
 export type BBox = [number, number, number, number];
 
@@ -162,7 +166,47 @@ export function eeMapUrl(
   if (vis?.palette) q.set("palette", Array.isArray(vis.palette) ? vis.palette.join(",") : vis.palette);
   else if (vis?.gamma != null) q.set("gamma", String(vis.gamma));
   if (vis?.bands?.length) q.set("bands", vis.bands.join(","));
+  if (vis?.composite) q.set("composite", vis.composite);
+  if (vis?.year != null) q.set("year", String(vis.year));
+  if (vis?.scale != null) q.set("gain", String(vis.scale));
   return `${eeBase()}api/ee/map?${q}`;
+}
+
+export function eeSampleUrl(
+  asset: string,
+  vis: EeVis | null | undefined,
+  kind: Extract<EeKind, "Image" | "ImageCollection">,
+  lng: number,
+  lat: number,
+  scale: number,
+): string {
+  const q = new URLSearchParams({
+    id: asset,
+    kind,
+    lng: String(lng),
+    lat: String(lat),
+    scale: String(scale),
+  });
+  if (vis?.bands?.length) q.set("bands", vis.bands.join(","));
+  if (vis?.composite) q.set("composite", vis.composite);
+  if (vis?.year != null) q.set("year", String(vis.year));
+  if (vis?.scale != null) q.set("gain", String(vis.scale));
+  return `${eeBase()}api/ee/sample?${q}`;
+}
+
+export async function fetchEeSample(
+  asset: string,
+  vis: EeVis | null | undefined,
+  kind: Extract<EeKind, "Image" | "ImageCollection">,
+  lng: number,
+  lat: number,
+  scale: number,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(eeSampleUrl(asset, vis, kind, lng, lat, scale));
+  if (!response.ok) throw new Error(await response.text());
+  const data = await response.json();
+  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+  return data as Record<string, unknown>;
 }
 
 export async function fetchEeTiles(

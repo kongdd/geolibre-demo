@@ -7,6 +7,7 @@ import {
 } from "@geolibre/core";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PENDING_EE_TILES } from "../plugins/earthengine/run";
 import { sanitizeGeeProject } from "../src/project-io";
 import { projectStore } from "../src/project-store";
 
@@ -120,7 +121,7 @@ test("load/save drop stale Earth Engine tiles", () => {
       visible: true,
       opacity: 1,
       style: { ...DEFAULT_LAYER_STYLE },
-      metadata: { eeAsset: "USGS/SRTMGL1_003", eeVisFp: '{"min":0}' },
+      metadata: { eeAsset: "USGS/SRTMGL1_003", eeKind: "Image", eeVisFp: '{"min":0}' },
     },
     {
       id: "cloud-api",
@@ -134,20 +135,20 @@ test("load/save drop stale Earth Engine tiles", () => {
       visible: true,
       opacity: 1,
       style: { ...DEFAULT_LAYER_STYLE },
-      metadata: { eeAsset: "USGS/SRTMGL1_003", eeVisFp: '{"min":0}' },
+      metadata: { eeAsset: "USGS/SRTMGL1_003", eeKind: "Image", eeVisFp: '{"min":0}' },
     },
   ]);
   const dirty = projectStore.getState().project;
   const saved = serializeProject(sanitizeGeeProject(dirty));
   assert.equal(saved.includes("eeVisFp"), false);
+  assert.equal(saved.includes("eeKind"), false);
   assert.equal(saved.includes("/map/abc/"), false);
   assert.equal(saved.includes("/maps/abc/tiles/"), false);
 
   projectStore.getState().loadProject(parseProject(serializeProject(dirty)));
   for (const loaded of projectStore.getState().project.layers) {
     assert.equal("eeVisFp" in (loaded.metadata ?? {}), false);
-    assert.deepEqual((loaded.source as { tiles?: string[] }).tiles, [
-      "https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}",
-    ]);
+    assert.equal("eeKind" in (loaded.metadata ?? {}), false);
+    assert.deepEqual((loaded.source as { tiles?: string[] }).tiles, [PENDING_EE_TILES]);
   }
 });

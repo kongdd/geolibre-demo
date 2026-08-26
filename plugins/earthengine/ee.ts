@@ -4,7 +4,7 @@ import type {
   Geometry,
 } from "geojson";
 import { projectStore } from "../../src/project-store";
-import { isCloudExpression, stripMapToken } from "./run";
+import { isCloudExpression, PENDING_EE_TILES, stripMapToken } from "./run";
 
 export namespace ee {
   export type Type = "Feature" | "FeatureCollection" | "Image" | "ImageCollection";
@@ -56,10 +56,6 @@ export function isLocalVectorSrc(src: unknown): boolean {
 
 export function isEe(value: unknown): value is ee.Object {
   return Boolean(value && typeof value === "object" && "eeType" in value);
-}
-
-export function eeKind(value: unknown): ee.Type | null {
-  return isEe(value) ? value.eeType : null;
 }
 
 export function isOfficialEe(value: unknown): value is ee.Computed {
@@ -144,7 +140,6 @@ export function bindEarthEngine(api: ee.Api): ee.Api {
   }) as ee.Api;
 }
 
-export type EeKind = "Image" | "ImageCollection" | "Feature" | "FeatureCollection";
 export type EeVis = {
   min?: number;
   max?: number;
@@ -162,72 +157,6 @@ function eeBase(): string {
   return import.meta.env?.BASE_URL ?? "/project-demo/";
 }
 
-export function eeMapUrl(
-  asset: string,
-  vis?: EeVis | null,
-  kind: Extract<EeKind, "Image" | "ImageCollection"> = "Image",
-): string {
-  const q = new URLSearchParams({ id: asset, kind });
-  if (vis?.min != null) q.set("min", String(vis.min));
-  if (vis?.max != null) q.set("max", String(vis.max));
-  if (vis?.palette) q.set("palette", Array.isArray(vis.palette) ? vis.palette.join(",") : vis.palette);
-  else if (vis?.gamma != null) q.set("gamma", String(vis.gamma));
-  if (vis?.bands?.length) q.set("bands", vis.bands.join(","));
-  if (vis?.composite) q.set("composite", vis.composite);
-  if (vis?.year != null) q.set("year", String(vis.year));
-  if (vis?.scale != null) q.set("gain", String(vis.scale));
-  return `${eeBase()}api/ee/map?${q}`;
-}
-
-export function eeSampleUrl(
-  asset: string,
-  vis: EeVis | null | undefined,
-  kind: Extract<EeKind, "Image" | "ImageCollection">,
-  lng: number,
-  lat: number,
-  scale: number,
-): string {
-  const q = new URLSearchParams({
-    id: asset,
-    kind,
-    lng: String(lng),
-    lat: String(lat),
-    scale: String(scale),
-  });
-  if (vis?.bands?.length) q.set("bands", vis.bands.join(","));
-  if (vis?.composite) q.set("composite", vis.composite);
-  if (vis?.year != null) q.set("year", String(vis.year));
-  if (vis?.scale != null) q.set("gain", String(vis.scale));
-  return `${eeBase()}api/ee/sample?${q}`;
-}
-
-export async function fetchEeSample(
-  asset: string,
-  vis: EeVis | null | undefined,
-  kind: Extract<EeKind, "Image" | "ImageCollection">,
-  lng: number,
-  lat: number,
-  scale: number,
-): Promise<Record<string, unknown>> {
-  const response = await fetch(eeSampleUrl(asset, vis, kind, lng, lat, scale));
-  if (!response.ok) throw new Error(await response.text());
-  const data = await response.json();
-  if (!data || typeof data !== "object" || Array.isArray(data)) return {};
-  return data as Record<string, unknown>;
-}
-
-export async function fetchEeTiles(
-  asset: string,
-  vis?: EeVis | null,
-  kind: Extract<EeKind, "Image" | "ImageCollection"> = "Image",
-): Promise<string> {
-  const response = await fetch(eeMapUrl(asset, vis, kind));
-  if (!response.ok) throw new Error(await response.text());
-  const data = (await response.json()) as { urlFormat?: string };
-  if (!data.urlFormat) throw new Error("Earth Engine 未返回瓦片 URL");
-  return data.urlFormat;
-}
-
 export function viewBounds(): BBox | null {
   const map = (globalThis as {
     __map?: { getBounds?: () => { getWest(): number; getSouth(): number; getEast(): number; getNorth(): number } };
@@ -236,73 +165,8 @@ export function viewBounds(): BBox | null {
   return box ? [box.getWest(), box.getSouth(), box.getEast(), box.getNorth()] : null;
 }
 
-export function eeGeoUrl(
-  asset: string,
-  kind: Extract<EeKind, "Feature" | "FeatureCollection">,
-  bbox?: BBox | null,
-): string {
-  const q = new URLSearchParams({ id: asset, kind });
-  if (bbox) {
-    q.set("west", String(bbox[0]));
-    q.set("south", String(bbox[1]));
-    q.set("east", String(bbox[2]));
-    q.set("north", String(bbox[3]));
-  }
-  return `${eeBase()}api/ee/geojson?${q}`;
-}
-
-export async function fetchEeGeoJSON(
-  asset: string,
-  kind: Extract<EeKind, "Feature" | "FeatureCollection">,
-  bbox?: BBox | null,
-): Promise<GeoJSONFeatureCollection> {
-  const response = await fetch(eeGeoUrl(asset, kind, bbox));
-  if (!response.ok) throw new Error(await response.text());
-  const data = await response.json();
-  if (data && typeof data === "object" && data.type === "Feature") {
-    return { type: "FeatureCollection", features: [data as GeoJSONFeature] };
-  }
-  if (data && typeof data === "object" && data.type === "FeatureCollection" && Array.isArray(data.features)) {
-    return data as GeoJSONFeatureCollection;
-  }
-  throw new Error("Earth Engine 未返回 GeoJSON");
-}
-
-export function eeBandsUrl(
-  asset: string,
-  kind: Extract<EeKind, "Image" | "ImageCollection"> = "Image",
-): string {
-  return `${eeBase()}api/ee/bands?${new URLSearchParams({ id: asset, kind })}`;
-}
-
-const bandCache = new Map<string, Promise<string[]>>();
-
-export function fetchEeBands(
-  asset: string,
-  kind: Extract<EeKind, "Image" | "ImageCollection"> = "Image",
-): Promise<string[]> {
-  const key = `${kind}:${asset}`;
-  const hit = bandCache.get(key);
-  if (hit) return hit;
-  const pending = fetch(eeBandsUrl(asset, kind))
-    .then(async (response) => {
-      if (!response.ok) throw new Error(await response.text());
-      const data = (await response.json()) as { bands?: unknown };
-      return Array.isArray(data.bands) ? data.bands.map(String) : [];
-    })
-    .catch((error) => {
-      bandCache.delete(key);
-      throw error;
-    });
-  bandCache.set(key, pending);
-  return pending;
-}
-
-export function isGeeRaster(layer: { type?: string; metadata?: { eeAsset?: unknown; eeExpr?: unknown } }): boolean {
-  return (
-    layer.type === "xyz" &&
-    (typeof layer.metadata?.eeAsset === "string" || isCloudExpression(layer.metadata?.eeExpr))
-  );
+export function isGeeRaster(layer: { type?: string; metadata?: { eeExpr?: unknown; eeAsset?: unknown } }): boolean {
+  return layer.type === "xyz" && isCloudExpression(layer.metadata?.eeExpr);
 }
 
 export function visFromGeeLayer(layer: {
@@ -327,40 +191,33 @@ export function visFromGeeLayer(layer: {
   return vis;
 }
 
-const geeFp = new Map<string, string>();
+const geeSync = new Map<string, { fp: string; pending: boolean }>();
 
-function isPendingGeeTiles(layer: { source?: unknown }): boolean {
+function hasPendingTiles(layer: { source?: unknown }): boolean {
   const tiles =
     layer.source && typeof layer.source === "object" && "tiles" in layer.source
       ? (layer.source as { tiles?: unknown }).tiles
       : null;
-  return Array.isArray(tiles) && tiles.some((item) => String(item).includes("/map/pending/"));
+  return Array.isArray(tiles) && tiles.some((url) => url === PENDING_EE_TILES || String(url).includes("/map/pending/"));
 }
 
 export function syncGeeRaster(layer: {
   id: string;
   type?: string;
   source?: unknown;
-  metadata?: {
-    eeAsset?: unknown;
-    eeExpr?: unknown;
-    eeKind?: unknown;
-    eeVis?: unknown;
-    rasterState?: unknown;
-  };
+  metadata?: { eeExpr?: unknown; eeVis?: unknown; rasterState?: unknown };
 }): void {
   if (!isGeeRaster(layer)) return;
-  const kind = layer.metadata?.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
   const vis = visFromGeeLayer(layer);
   const fp = JSON.stringify(vis);
-  if (!isPendingGeeTiles(layer) && geeFp.get(layer.id) === fp) return;
-  geeFp.set(layer.id, fp);
-  const tiles = isCloudExpression(layer.metadata?.eeExpr)
-    ? postRun(layer.metadata.eeExpr, "getMap", vis).then((map) => String((map as { urlFormat: string }).urlFormat))
-    : fetchEeTiles(String(layer.metadata?.eeAsset), vis, kind);
-  void tiles
+  const state = geeSync.get(layer.id);
+  if (state?.fp === fp && (state.pending || !hasPendingTiles(layer))) return;
+  geeSync.set(layer.id, { fp, pending: true });
+  void postRun(layer.metadata!.eeExpr as Record<string, unknown>, "getMap", vis)
+    .then((map) => String((map as { urlFormat: string }).urlFormat))
     .then((url) => {
-      if (geeFp.get(layer.id) !== fp) return;
+      if (geeSync.get(layer.id)?.fp !== fp) return;
+      geeSync.set(layer.id, { fp, pending: false });
       const current = projectStore.getState().project.layers.find((item) => item.id === layer.id);
       if (!current) return;
       projectStore.getState().updateLayer(layer.id, {
@@ -368,7 +225,7 @@ export function syncGeeRaster(layer: {
       });
     })
     .catch((error) => {
-      if (geeFp.get(layer.id) === fp) geeFp.delete(layer.id);
+      if (geeSync.get(layer.id)?.fp === fp) geeSync.delete(layer.id);
       console.error(error);
     });
 }
@@ -543,75 +400,49 @@ export function tilesFromMapId(map: ee.MapId): string {
   throw new Error("Earth Engine 未返回瓦片 URL");
 }
 
-export function imageFromGeeLayer(layer: {
-  metadata?: { eeExpr?: unknown; eeAsset?: unknown; eeKind?: unknown };
-}): ee.Computed | null {
-  const api = officialApi as {
+export function imageFromGeeLayer(layer: { metadata?: { eeExpr?: unknown } }): ee.Computed | null {
+  const decoder = (officialApi as {
     Deserializer?: { decodeCloudApi?: (value: unknown) => ee.Computed };
-    Image?: new (id: string) => ee.Computed & { mosaic?: () => ee.Computed };
-    ImageCollection?: new (id: string) => ee.Computed & { mosaic?: () => ee.Computed };
-  } | null;
-  if (!api) return null;
-  if (isCloudExpression(layer.metadata?.eeExpr) && api.Deserializer?.decodeCloudApi) {
-    const obj = api.Deserializer.decodeCloudApi(layer.metadata.eeExpr);
-    const name = typeof obj.name === "function" ? obj.name() : "";
-    if (name === "ImageCollection" && typeof (obj as { mosaic?: () => ee.Computed }).mosaic === "function") {
-      return (obj as { mosaic: () => ee.Computed }).mosaic();
-    }
-    return obj;
-  }
-  if (typeof layer.metadata?.eeAsset !== "string") return null;
-  if (layer.metadata.eeKind === "ImageCollection" && api.ImageCollection) {
-    const col = new api.ImageCollection(layer.metadata.eeAsset);
-    return typeof col.mosaic === "function" ? col.mosaic() : col;
-  }
-  return api.Image ? new api.Image(layer.metadata.eeAsset) : null;
+  } | null)?.Deserializer?.decodeCloudApi;
+  if (!decoder || !isCloudExpression(layer.metadata?.eeExpr)) return null;
+  const obj = decoder(layer.metadata.eeExpr);
+  const image = obj as ee.Computed & { mosaic?: () => ee.Computed };
+  return typeof obj.name === "function" && obj.name() === "ImageCollection" && image.mosaic
+    ? image.mosaic()
+    : obj;
 }
 
 export async function sampleGeeLayer(
-  layer: { metadata?: { eeExpr?: unknown; eeAsset?: unknown; eeKind?: unknown; eeVis?: unknown } },
+  layer: { metadata?: { eeExpr?: unknown } },
   lng: number,
   lat: number,
   scale: number,
 ): Promise<Record<string, unknown>> {
+  await Initialize();
   const api = ee as unknown as {
-    Reducer?: { first: () => unknown };
-    Geometry?: { Point: new (xy: [number, number]) => unknown };
+    Reducer: { first: () => unknown };
+    Geometry: { Point: new (xy: [number, number]) => unknown };
   };
   const image = imageFromGeeLayer(layer) as {
     reduceRegion?: (opts: object) => ee.Computed;
   } | null;
-  if (image?.reduceRegion && api?.Reducer && api.Geometry) {
-    const sampled = image.reduceRegion({
-      reducer: api.Reducer.first(),
-      geometry: new api.Geometry.Point([lng, lat]),
-      scale: Number.isFinite(scale) && scale > 0 ? scale : 30,
-      bestEffort: true,
-    });
-    const data = await callRun(sampled, "getInfo");
-    return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
-  }
-  if (typeof layer.metadata?.eeAsset === "string") {
-    const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
-    return fetchEeSample(layer.metadata.eeAsset, visFromGeeLayer(layer), kind, lng, lat, scale);
-  }
-  throw new Error("不是 Earth Engine 栅格");
+  if (!image?.reduceRegion) throw new Error("不是 Earth Engine 栅格");
+  const sampled = image.reduceRegion({
+    reducer: api.Reducer.first(),
+    geometry: new api.Geometry.Point([lng, lat]),
+    scale: Number.isFinite(scale) && scale > 0 ? scale : 30,
+    bestEffort: true,
+  });
+  const data = await callRun(sampled, "getInfo");
+  return data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
 }
 
-export function fetchEeBandsForLayer(layer: {
-  metadata?: { eeExpr?: unknown; eeAsset?: unknown; eeKind?: unknown };
+export async function fetchEeBandsForLayer(layer: {
+  metadata?: { eeExpr?: unknown };
 }): Promise<string[]> {
+  await Initialize();
   const image = imageFromGeeLayer(layer) as { bandNames?: () => ee.Computed } | null;
-  if (image?.bandNames) {
-    return callRun(image.bandNames(), "getInfo").then((names) =>
-      Array.isArray(names) ? names.map(String) : [],
-    );
-  }
-  if (typeof layer.metadata?.eeAsset === "string") {
-    return fetchEeBands(
-      layer.metadata.eeAsset,
-      layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image",
-    );
-  }
-  return Promise.resolve([]);
+  if (!image?.bandNames) return [];
+  const names = await callRun(image.bandNames(), "getInfo");
+  return Array.isArray(names) ? names.map(String) : [];
 }

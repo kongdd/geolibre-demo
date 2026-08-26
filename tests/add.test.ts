@@ -6,8 +6,6 @@ import {
   asCollection,
   bindEarthEngine,
   ee,
-  eeGeoUrl,
-  eeMapUrl,
   isEe,
   isGeeRaster,
   isLocalImageSrc,
@@ -98,48 +96,11 @@ test("local vs remote src sniff", () => {
   assert.equal(isEe(bound.Image("https://a/dem.tif")), true);
 });
 
-test("eeMapUrl encodes GEE asset", () => {
-  const url = eeMapUrl("USGS/SRTMGL1_003", { min: 0, max: 4000, palette: ["006633", "E5FFCC"] });
-  assert.match(url, /api\/ee\/map/);
-  assert.match(url, /id=USGS/);
-  assert.match(url, /min=0/);
-  assert.match(url, /palette=006633/);
-  const col = eeMapUrl("LANDSAT/LC08/C02/T1_L2", { bands: ["SR_B4", "SR_B3", "SR_B2"] }, "ImageCollection");
-  assert.match(col, /kind=ImageCollection/);
-  assert.match(col, /bands=SR_B4/);
-  const gamma = eeMapUrl("USGS/SRTMGL1_003", { min: 0, max: 4000, gamma: 1.2 });
-  assert.match(gamma, /gamma=1.2/);
-  assert.equal(gamma.includes("palette="), false);
-  const yearly = eeMapUrl("projects/pml_evapotranspiration/PML/OUTPUT/PML_V22a_VIIRS", { bands: ["ET"], composite: "yearSum" }, "ImageCollection");
-  assert.match(yearly, /composite=yearSum/);
-  assert.match(yearly, /bands=ET/);
-});
-
-test("GEE asset image is pending xyz", () => {
-  projectStore.getState().newProject("SRTM");
-  const layer = Map.addLayer(ee.Image("USGS/SRTMGL1_003"), { min: 0, max: 4000 }, "SRTM");
-  assert.equal(layer.type, "xyz");
-  assert.equal(layer.name, "SRTM");
-  assert.equal(isGeeRaster(layer), true);
-  const col = Map.addLayer(ee.ImageCollection("LANDSAT/LC08/C02/T1_L2"), { min: 0, max: 30000 }, "L8");
-  assert.equal(col.type, "xyz");
-  assert.equal(col.name, "L8");
-});
-
-test("eeGeoUrl encodes bbox", () => {
-  const url = eeGeoUrl("USDOS/LSIB_SIMPLE/2017", "FeatureCollection", [100, 20, 120, 40]);
-  assert.match(url, /api\/ee\/geojson/);
-  assert.match(url, /kind=FeatureCollection/);
-  assert.match(url, /west=100/);
-});
-
-test("GEE feature assets are pending geojson", () => {
-  projectStore.getState().newProject("FC");
-  const fc = Map.addLayer(ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017"), { color: "c62828" }, "borders");
-  assert.equal(fc.type, "geojson");
-  assert.equal(fc.name, "borders");
-  const feat = Map.addLayer(ee.Feature("USDOS/LSIB_SIMPLE/2017"), null, "one");
-  assert.equal(feat.type, "geojson");
+test("GEE assets require initialization", () => {
+  projectStore.getState().newProject("GEE");
+  assert.throws(() => Map.addLayer(ee.Image("USGS/SRTMGL1_003")), /Initialize/);
+  assert.throws(() => Map.addLayer(ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")), /Initialize/);
+  assert.throws(() => Map.addLayer(ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")), /Initialize/);
 });
 
 test("serialized official image stores eeExpr", () => {
@@ -164,6 +125,7 @@ test("serialized official image stores eeExpr", () => {
   assert.equal(layer.type, "xyz");
   assert.equal(isGeeRaster(layer), true);
   assert.equal((layer.metadata.eeExpr as { result?: string })?.result, "0");
+  assert.equal("eeKind" in layer.metadata, false);
 });
 
 test("official EE getMap becomes xyz tiles", () => {

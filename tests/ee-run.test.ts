@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eeRoute, isCloudExpression, isGeeRaster, parseRunBody, stripMapToken } from "@geolibre/plugins/earthengine";
+import {
+  eeRoute,
+  isCloudExpression,
+  isGeeRaster,
+  parseRunBody,
+  PENDING_EE_TILES,
+  stripMapToken,
+  syncGeeRaster,
+} from "@geolibre/plugins/earthengine";
 
 const expr = {
   result: "0",
@@ -39,11 +47,35 @@ test("eeRoute matches exact api path", () => {
   assert.equal(eeRoute("/project-demo/api/ee/run"), "run");
   assert.equal(eeRoute("/api/ee/ready"), "ready");
   assert.equal(eeRoute("/project-demo/api/ee/run/extra"), null);
+  assert.equal(eeRoute("/project-demo/api/ee/map"), null);
   assert.equal(eeRoute("/other/api/ee/run"), null);
 });
 
 test("isGeeRaster accepts eeExpr", () => {
   assert.equal(isGeeRaster({ type: "xyz", metadata: { eeExpr: expr } }), true);
-  assert.equal(isGeeRaster({ type: "xyz", metadata: { eeAsset: "USGS/SRTMGL1_003" } }), true);
+  assert.equal(isGeeRaster({ type: "xyz", metadata: { eeAsset: "USGS/SRTMGL1_003" } }), false);
   assert.equal(isGeeRaster({ type: "xyz", metadata: {} }), false);
+});
+
+test("syncGeeRaster deduplicates pending requests", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response(JSON.stringify({ urlFormat: "https://example/{z}/{x}/{y}" }));
+  };
+  try {
+    const layer = {
+      id: "pending-dedupe",
+      type: "xyz",
+      source: { type: "raster", tiles: [PENDING_EE_TILES] },
+      metadata: { eeExpr: expr, eeVis: { min: 0, max: 1 } },
+    };
+    syncGeeRaster(layer);
+    syncGeeRaster(layer);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

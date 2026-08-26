@@ -1,4 +1,9 @@
 export const EE_BODY_LIMIT = 256 * 1024;
+export const EE_RESULT_LIMIT = 2 * 1024 * 1024;
+export const EE_RUN_CONCURRENCY = 4;
+export const EE_RUN_TIMEOUT = 30_000;
+export const PENDING_EE_TILES =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==";
 export type RunOp = "getMap" | "getInfo";
 export type RunRequest = {
   expression: Record<string, unknown>;
@@ -67,8 +72,8 @@ export function stripMapToken(url: string): string {
   return kept.length ? `${url.slice(0, cut)}?${kept.join("&")}` : url.slice(0, cut);
 }
 
-export function eeRoute(pathname: string): string | null {
+export function eeRoute(pathname: string): "ready" | "run" | null {
   const path = pathname.replace(/\/+$/, "");
-  const match = path.match(/^(?:\/project-demo)?\/api\/ee\/([^/]+)$/);
-  return match?.[1] ?? null;
+  const route = path.match(/^(?:\/project-demo)?\/api\/ee\/([^/]+)$/)?.[1];
+  return route === "ready" || route === "run" ? route : null;
 }

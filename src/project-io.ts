@@ -1,6 +1,5 @@
 import { parseProject, serializeProject, type GeoLibreProject } from "@geolibre/core";
-
-const PENDING_EE_TILES = "https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}";
+import { PENDING_EE_TILES } from "../plugins/earthengine/run";
 
 function layerTiles(layer: GeoLibreProject["layers"][number]): string[] | undefined {
   const source = layer.source as { tiles?: unknown } | undefined;
@@ -16,12 +15,13 @@ export function sanitizeGeeProject(project: GeoLibreProject): GeoLibreProject {
       const stale = tiles?.some(
         (url) =>
           url.includes("earthengine.googleapis.com/") &&
+          url !== PENDING_EE_TILES &&
           !url.includes("/map/pending/") &&
           (url.includes("/map/") || /\/v1\/.+\/maps\/.+\/tiles\//.test(url)),
       );
-      const hasFp = layer.metadata != null && "eeVisFp" in layer.metadata;
-      if (!stale && !hasFp) return layer;
-      const { eeVisFp: _fp, ...metadata } = layer.metadata ?? {};
+      const legacy = layer.metadata != null && ("eeVisFp" in layer.metadata || "eeKind" in layer.metadata);
+      if (!stale && !legacy) return layer;
+      const { eeVisFp: _fp, eeKind: _kind, ...metadata } = layer.metadata ?? {};
       return {
         ...layer,
         metadata,

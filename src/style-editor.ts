@@ -282,8 +282,7 @@ function geeVisOf(layer: GeoLibreLayer): EeVis {
 function geeVisEditor(layer: GeoLibreLayer): HTMLElement[] {
   const vis = geeVisOf(layer);
   const names = Array.isArray(layer.metadata.eeBands) ? layer.metadata.eeBands.map(String) : [];
-  const asset = typeof layer.metadata.eeAsset === "string" ? layer.metadata.eeAsset : "";
-  if ((asset || layer.metadata.eeExpr) && !names.length) {
+  if (layer.metadata.eeExpr && !names.length) {
     void fetchEeBandsForLayer(layer)
       .then((bands) => {
         if (projectStore.getState().selectedLayerId !== layer.id) return;

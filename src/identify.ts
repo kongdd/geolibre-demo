@@ -104,8 +104,7 @@ function onClick(event: maplibregl.MapMouseEvent): void {
 
 async function identifyGee(layer: GeoLibreLayer, event: maplibregl.MapMouseEvent): Promise<void> {
   const seq = ++sampleSeq;
-  const kind = layer.metadata.eeKind === "ImageCollection" ? "ImageCollection" : "Image";
-  const scale = kind === "ImageCollection" ? 500 : 30;
+  const scale = Number((layer.metadata.eeVis as { scale?: unknown } | undefined)?.scale) || 30;
   showHits([{ name: layer.name, properties: { _: "取样中…" } }], event.lngLat);
   try {
     const values = await sampleGeeLayer(layer, event.lngLat.lng, event.lngLat.lat, scale);

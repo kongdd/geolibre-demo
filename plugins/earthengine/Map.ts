@@ -13,9 +13,7 @@ import {
 import { projectStore } from "../../src/project-store";
 import {
   ee,
-  eeKind,
   encodeExpression,
-  fetchEeGeoJSON,
   getMapResult,
   isEe,
   isLocalImageSrc,
@@ -27,6 +25,7 @@ import {
   viewBounds,
 } from "./ee";
 import { annualEt } from "./PMLV2";
+import { PENDING_EE_TILES } from "./run";
 import { createLocalRasterLayer, createRemoteRasterLayer } from "../../src/raster";
 import { createVectorLayer, readVectorFile } from "../../src/vector";
 
@@ -271,7 +270,7 @@ function paintImage(url: string, opts: AddOpts): GeoLibreLayer {
 }
 
 function paintTiles(pendingName: string, opts: AddOpts, load: () => Promise<string>): GeoLibreLayer {
-  const layer = xyzOf("https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}", {
+  const layer = xyzOf(PENDING_EE_TILES, {
     ...opts,
     name: opts.name || pendingName,
   });
@@ -302,8 +301,7 @@ function paintEeComputed(obj: ee.Computed, vis: VisParams | null | undefined, op
     graph = annualEt(api as never, obj as never, vis.bands?.length ? String(vis.bands[0]) : "ET", vis.year) as ee.Computed;
   }
   const expr = encodeExpression(graph);
-  const kind = typeof obj.name === "function" && obj.name() === "ImageCollection" ? "ImageCollection" : "Image";
-  const layer = xyzOf("https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}", {
+  const layer = xyzOf(PENDING_EE_TILES, {
     ...opts,
     name: opts.name || simpleAssetId(obj) || "Earth Engine",
   });
@@ -311,12 +309,12 @@ function paintEeComputed(obj: ee.Computed, vis: VisParams | null | undefined, op
     ...layer.metadata,
     eeExpr: expr,
     eeAsset: simpleAssetId(obj),
-    eeKind: kind,
     eeVis: {
       min: vis?.min,
       max: vis?.max,
       palette: vis?.palette,
       bands: vis?.bands,
+      scale: vis?.scale,
     },
   };
   return push(layer);
@@ -331,7 +329,6 @@ function paintOfficialVector(obj: ee.Computed, opts: AddOpts, existing: GeoLibre
     ...layer.metadata,
     eeExpr: encodeExpression(obj),
     eeAsset: simpleAssetId(obj),
-    eeKind: typeof obj.name === "function" && obj.name() === "Feature" ? "Feature" : "FeatureCollection",
   };
   push(layer);
   const box = viewBounds();
@@ -354,51 +351,6 @@ function paintOfficialVector(obj: ee.Computed, opts: AddOpts, existing: GeoLibre
   return layer;
 }
 
-function paintEeAsset(
-  asset: string,
-  vis: VisParams | null | undefined,
-  opts: AddOpts,
-  kind: "Image" | "ImageCollection" = "Image",
-): GeoLibreLayer {
-  const layer = xyzOf("https://earthengine.googleapis.com/map/pending/{z}/{x}/{y}", {
-    ...opts,
-    name: opts.name || asset || "Earth Engine",
-  });
-  layer.metadata = {
-    ...layer.metadata,
-    eeAsset: asset,
-    eeKind: kind,
-    eeVis: {
-      min: vis?.min,
-      max: vis?.max,
-      palette: vis?.palette,
-      bands: vis?.bands,
-      composite: vis?.composite,
-      year: vis?.year,
-      scale: vis?.scale,
-    },
-  };
-  return push(layer);
-}
-
-function paintEeVector(
-  asset: string,
-  kind: "Feature" | "FeatureCollection",
-  opts: AddOpts,
-  existing: GeoLibreLayer[],
-): GeoLibreLayer {
-  const layer = applyOpts(
-    createVectorLayer(opts.name || asset || "Earth Engine", { type: "FeatureCollection", features: [] }, existing),
-    opts,
-  );
-  layer.metadata = { ...layer.metadata, eeAsset: asset, eeKind: kind };
-  push(layer);
-  void fetchEeGeoJSON(asset, kind, viewBounds())
-    .then((geojson) => projectStore.getState().updateLayer(layer.id, { geojson }))
-    .catch((error) => console.error(error));
-  return layer;
-}
-
 /** GEE `Map.addLayer`：按 ee 类型分流；同步返回图层。 */
 export function addLayer(
   obj: AddSrc,
@@ -417,26 +369,26 @@ export function addLayer(
     return paintEeComputed(obj, vis, opts);
   }
   if (isOfficialEe(obj)) return paintOfficial(obj, vis, opts);
-  const eeType = eeKind(obj);
+  const eeType = isEe(obj) ? obj.eeType : null;
   if (eeType === "Feature" && isEe(obj) && obj.eeType === "Feature") {
     if (obj.feature) return paintVector({ type: "FeatureCollection", features: [obj.feature] }, opts, existing);
     if (obj.url && isLocalVectorSrc(obj.url)) return paintPending(obj.url, opts, existing);
-    return paintEeVector(obj.url || "", "Feature", opts, existing);
+    throw new Error("请先 await ee.Initialize()");
   }
   if (eeType === "FeatureCollection" && isEe(obj) && obj.eeType === "FeatureCollection") {
     if (obj.collection) return paintVector(obj.collection, opts, existing);
     if (obj.url && isLocalVectorSrc(obj.url)) return paintPending(obj.url, opts, existing);
-    return paintEeVector(obj.url || "", "FeatureCollection", opts, existing);
+    throw new Error("请先 await ee.Initialize()");
   }
   if (eeType === "Image" && isEe(obj) && obj.eeType === "Image") {
     if (obj.file) return paintPending(obj.file, { ...opts, type: "cog" }, existing);
     if (obj.url && isLocalImageSrc(obj.url)) return paintImage(obj.url, opts);
-    return paintEeAsset(obj.url || "", vis, opts);
+    throw new Error("请先 await ee.Initialize()");
   }
   if (eeType === "ImageCollection" && isEe(obj) && obj.eeType === "ImageCollection") {
     const first = obj.urls[0] ?? "";
     if (isLocalImageSrc(first)) return paintImage(first, opts);
-    return paintEeAsset(first, vis, opts, "ImageCollection");
+    throw new Error("请先 await ee.Initialize()");
   }
   const kind = sniff(obj, opts.type);
   if (

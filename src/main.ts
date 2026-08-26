@@ -168,18 +168,23 @@ element("save-project").addEventListener("click", () => {
   projectStore.getState().markSaved();
   setStatus("Project saved");
 });
-function addGee(kind: "Image" | "ImageCollection" | "Feature" | "FeatureCollection"): void {
-  const id = prompt(`GEE ${kind} ID`);
-  if (!id?.trim()) return;
-  const src =
-    kind === "Image"
-      ? ee.Image(id.trim())
-      : kind === "ImageCollection"
-        ? ee.ImageCollection(id.trim())
-        : kind === "Feature"
-          ? ee.Feature(id.trim())
-          : ee.FeatureCollection(id.trim());
-  Map.addLayer(src, null, id.trim().split("/").pop());
+async function addGee(kind: "Image" | "ImageCollection" | "Feature" | "FeatureCollection"): Promise<void> {
+  const id = prompt(`GEE ${kind} ID`)?.trim();
+  if (!id) return;
+  try {
+    await ee.Initialize();
+    const src =
+      kind === "Image"
+        ? ee.Image(id)
+        : kind === "ImageCollection"
+          ? ee.ImageCollection(id)
+          : kind === "Feature"
+            ? ee.Feature(id)
+            : ee.FeatureCollection(id);
+    Map.addLayer(src, null, id.split("/").pop());
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
 }
 
 element("add-vector").addEventListener("click", (event) => {

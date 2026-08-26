@@ -39,6 +39,7 @@ export async function loadDemoLayers(): Promise<string> {
         max: 1600,
         bands: ["ET"],
         composite: "yearSum",
+        scale: 500,
         palette: [
           "0000FF", "033FA9", "067F54", "18B80E", "70D209", "C7EE03", "FFF200",
           "FFD200", "FFB100", "FF8000", "FF4500", "FF0A00", "CE0027", "920057", "570088",

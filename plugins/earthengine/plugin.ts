@@ -1,16 +1,27 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 import ee from "ee-auth";
-import { annualEt } from "./PMLV2.ts";
-import { EE_BODY_LIMIT, eeRoute, parseRunBody, stripMapToken } from "./run.ts";
+import {
+  EE_BODY_LIMIT,
+  EE_RESULT_LIMIT,
+  EE_RUN_CONCURRENCY,
+  EE_RUN_TIMEOUT,
+  eeRoute,
+  parseRunBody,
+  stripMapToken,
+} from "./run.ts";
+
+let activeRuns = 0;
+const requests = new Map<string, { minute: number; count: number }>();
 
 function json(res: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
+  let text = JSON.stringify(body);
   if (/access_token|refresh_token/i.test(text)) {
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ error: "internal" }));
-    return;
+    status = 500;
+    text = JSON.stringify({ error: "internal" });
+  } else if (Buffer.byteLength(text) > EE_RESULT_LIMIT) {
+    status = 413;
+    text = JSON.stringify({ error: "result too large" });
   }
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
@@ -22,30 +33,37 @@ function publicError(error: unknown): string {
   return /token|credential|oauth/i.test(message) ? "Earth Engine 请求失败" : message;
 }
 
-function imageFromRequest(id: string, url: URL): ee.Image {
-  if (url.searchParams.get("kind") !== "ImageCollection") return new ee.Image(id);
-
-  const bands = url.searchParams.get("bands");
-  const col = new ee.ImageCollection(id);
-  if (url.searchParams.get("composite") !== "yearSum") {
-    return (bands ? col.select(bands.split(",")) : col).mosaic();
-  }
-
-  return annualEt(ee, col, bands?.split(",")[0], Number(url.searchParams.get("year")));
+function clientIp(req: IncomingMessage): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  return String(Array.isArray(forwarded) ? forwarded[0] : forwarded ?? req.socket.remoteAddress ?? "unknown")
+    .split(",")[0]!
+    .trim();
 }
 
-function getMap(image: { getMap: Function }, vis: object): Promise<{ urlFormat?: string; mapid?: string }> {
-  return new Promise((resolve, reject) => {
-    image.getMap(vis, (a: unknown, b: unknown) => {
-      const map = (a && typeof a === "object" && ("urlFormat" in a || "mapid" in a) ? a : null) as
-        | { urlFormat?: string; mapid?: string }
-        | null;
-      const error = map ? (map === a ? b : a) : typeof a === "string" ? a : b || a;
-      if (error) reject(error instanceof Error ? error : new Error(String(error)));
-      else if (!map?.urlFormat && !map?.mapid) reject(new Error("Earth Engine 未返回瓦片 URL"));
-      else resolve(map!);
-    });
-  });
+function allowRequest(req: IncomingMessage): boolean {
+  const minute = Math.floor(Date.now() / 60_000);
+  const key = clientIp(req);
+  const hit = requests.get(key);
+  if (!hit || hit.minute !== minute) {
+    // ponytail: 单进程限流；多实例部署时移到网关。
+    if (requests.size > 10_000) requests.clear();
+    requests.set(key, { minute, count: 1 });
+    return true;
+  }
+  return ++hit.count <= 60;
+}
+
+function sameOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  const forwarded = req.headers["x-forwarded-host"];
+  const host = String(Array.isArray(forwarded) ? forwarded[0] : forwarded ?? req.headers.host ?? "")
+    .split(",")[0]!
+    .trim();
+  try {
+    return typeof origin === "string" && new URL(origin).host === host;
+  } catch {
+    return false;
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -54,9 +72,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
-    if (size > EE_BODY_LIMIT) {
-      throw Object.assign(new Error("payload too large"), { status: 413 });
-    }
+    if (size > EE_BODY_LIMIT) throw Object.assign(new Error("payload too large"), { status: 413 });
     chunks.push(buf);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -68,13 +84,12 @@ function algorithms(): Promise<unknown> {
     const done = (value: unknown, error?: unknown) => {
       if (settled) return;
       settled = true;
-      if (error) reject(error);
-      else resolve(value);
+      error ? reject(error) : resolve(value);
     };
     try {
       const ret = ee.data.getAlgorithms((value: unknown, error?: unknown) => done(value, error));
       if (ret && typeof (ret as Promise<unknown>).then === "function") {
-        void (ret as Promise<unknown>).then((value) => done(value), done);
+        void (ret as Promise<unknown>).then((value) => done(value), (error) => done(undefined, error));
       } else if (ret && typeof ret === "object") {
         done(ret);
       }
@@ -84,11 +99,55 @@ function algorithms(): Promise<unknown> {
   });
 }
 
+function terminal(obj: object, method: "getInfo" | "getMap", arg?: object): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (value: unknown, error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      error ? reject(error) : resolve(value);
+    };
+    try {
+      const fn = (obj as Record<string, Function>)[method];
+      const callback = (a: unknown, b?: unknown) => {
+        if (method === "getInfo") return done(a, b);
+        const map = a && typeof a === "object" && ("urlFormat" in a || "mapid" in a) ? a : b;
+        done(map, map === a ? b : a);
+      };
+      const ret = method === "getMap" ? fn!.call(obj, arg ?? {}, callback) : fn!.call(obj, callback);
+      if (ret && typeof (ret as Promise<unknown>).then === "function") {
+        void (ret as Promise<unknown>).then((value) => done(value), (error) => done(undefined, error));
+      } else if (ret !== undefined) {
+        done(ret);
+      }
+    } catch (error) {
+      done(undefined, error);
+    }
+  });
+}
+
+async function limited<T>(run: () => Promise<T>): Promise<T> {
+  if (activeRuns >= EE_RUN_CONCURRENCY) throw Object.assign(new Error("busy"), { status: 429 });
+  activeRuns++;
+  const task = run().finally(() => activeRuns--);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(Object.assign(new Error("timeout"), { status: 504 })),
+      EE_RUN_TIMEOUT,
+    );
+  });
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 function decodeExpression(expression: Record<string, unknown>): {
   getMap?: Function;
   getInfo?: Function;
   mosaic?: Function;
-  name?: () => string;
 } {
   const decoder = ee.Deserializer;
   if (decoder?.decodeCloudApi) return decoder.decodeCloudApi(expression);
@@ -96,101 +155,40 @@ function decodeExpression(expression: Record<string, unknown>): {
   throw new Error("Earth Engine 无法反序列化");
 }
 
-function urlFormatOf(map: { urlFormat?: string; mapid?: string }): string {
-  if (map.urlFormat) return stripMapToken(map.urlFormat);
-  if (map.mapid) return `https://earthengine.googleapis.com/map/${map.mapid}/{z}/{x}/{y}`;
+function urlFormatOf(map: unknown): string {
+  const value = map as { urlFormat?: string; mapid?: string };
+  if (value.urlFormat) return stripMapToken(value.urlFormat);
+  if (value.mapid) return `https://earthengine.googleapis.com/map/${value.mapid}/{z}/{x}/{y}`;
   throw new Error("Earth Engine 未返回瓦片 URL");
 }
 
-const legacy = new Set(["geojson", "bands", "sample", "map"]);
-const assetId = /^[A-Za-z0-9_./-]+$/;
-
 async function handle(req: IncomingMessage, res: ServerResponse, next: () => void): Promise<void> {
-  const url = new URL(req.url ?? "/", "http://127.0.0.1");
-  const route = eeRoute(url.pathname);
+  const route = eeRoute(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
   if (!route) return next();
-
   try {
-    if (route === "run") {
-      if (req.method !== "POST") return json(res, 405, { error: "method" });
-      const body = parseRunBody(await readBody(req));
-      await ee.Initialize();
-      const obj = decodeExpression(body.expression);
-      if (body.op === "getMap") {
-        const image = typeof obj.getMap === "function" ? obj : typeof obj.mosaic === "function" ? obj.mosaic() : null;
-        if (!image || typeof image.getMap !== "function") return json(res, 400, { error: "not an image" });
-        return json(res, 200, { urlFormat: urlFormatOf(await getMap(image, body.vis)) });
-      }
-      if (typeof obj.getInfo !== "function") return json(res, 400, { error: "not computable" });
-      return json(res, 200, obj.getInfo());
-    }
-
     if (route === "ready") {
       if (req.method !== "GET") return json(res, 405, { error: "method" });
       await ee.Initialize();
+      res.setHeader("Cache-Control", "private, max-age=3600");
       return json(res, 200, { ok: true, algorithms: await algorithms() });
     }
+    if (req.method !== "POST") return json(res, 405, { error: "method" });
+    if (!sameOrigin(req)) return json(res, 403, { error: "origin" });
+    if (!allowRequest(req)) return json(res, 429, { error: "rate limit" });
 
-    if (!legacy.has(route) || req.method !== "GET") return next();
-
-    const id = url.searchParams.get("id") ?? "";
-    if (!assetId.test(id)) {
-      return json(res, 400, { error: route === "sample" ? "invalid sample" : "invalid id" });
-    }
-    const box = ["west", "south", "east", "north"].map((key) => {
-      const value = url.searchParams.get(key);
-      return value == null || value === "" ? NaN : Number(value);
-    });
-    // ponytail: 只拉当前视野；无 bbox 不拉全球表
-    if (route === "geojson" && !box.every(Number.isFinite)) {
-      return json(res, 200, { type: "FeatureCollection", features: [] });
-    }
-    const lng = Number(url.searchParams.get("lng"));
-    const lat = Number(url.searchParams.get("lat"));
-    if (route === "sample" && (!Number.isFinite(lng) || !Number.isFinite(lat))) {
-      return json(res, 400, { error: "invalid sample" });
-    }
-
+    const body = parseRunBody(await readBody(req));
     await ee.Initialize();
-    if (route === "geojson") {
-      let table = new ee.FeatureCollection(id).filterBounds(new ee.Geometry.Rectangle(box, null, false));
-      table = table.limit(url.searchParams.get("kind") === "Feature" ? 1 : 2000);
-      return json(res, 200, table.getInfo());
+    const obj = decodeExpression(body.expression);
+    if (body.op === "getMap") {
+      const image = obj.getMap ? obj : obj.mosaic?.();
+      if (!image?.getMap) return json(res, 400, { error: "not an image" });
+      const map = await limited(() => terminal(image, "getMap", body.vis));
+      return json(res, 200, { urlFormat: urlFormatOf(map) });
     }
-    if (route === "bands") {
-      const image =
-        url.searchParams.get("kind") === "ImageCollection" ? new ee.ImageCollection(id).first() : new ee.Image(id);
-      const names = image.bandNames().getInfo();
-      return json(res, 200, { bands: Array.isArray(names) ? names : [] });
-    }
-    if (route === "sample") {
-      const scale = Number(url.searchParams.get("scale"));
-      return json(
-        res,
-        200,
-        imageFromRequest(id, url)
-          .reduceRegion({
-            reducer: ee.Reducer.first(),
-            geometry: new ee.Geometry.Point([lng, lat]),
-            scale: Number.isFinite(scale) && scale > 0 ? scale : 30,
-            bestEffort: true,
-          })
-          .getInfo(),
-      );
-    }
-    const vis: Record<string, unknown> = {};
-    const min = url.searchParams.get("min");
-    const max = url.searchParams.get("max");
-    const palette = url.searchParams.get("palette");
-    const bands = url.searchParams.get("bands");
-    const gamma = url.searchParams.get("gamma");
-    if (min != null) vis.min = Number(min);
-    if (max != null) vis.max = Number(max);
-    if (palette) vis.palette = palette.split(",");
-    else if (gamma != null) vis.gamma = Number(gamma);
-    if (bands) vis.bands = bands.split(",");
-    return json(res, 200, { urlFormat: urlFormatOf(await getMap(imageFromRequest(id, url), vis)) });
+    if (!obj.getInfo) return json(res, 400, { error: "not computable" });
+    return json(res, 200, await limited(() => terminal(obj, "getInfo")));
   } catch (error) {
+    console.error("[ee]", error);
     const status = Number((error as { status?: unknown })?.status);
     json(res, Number.isInteger(status) && status >= 400 && status < 600 ? status : 500, {
       error: publicError(error),
@@ -198,7 +196,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, next: () => voi
   }
 }
 
-/** Node `ee-auth`：执行序列化计算图；不把 access token 送出去。 */
+/** Node `ee-auth`：匿名用户共享受限的服务端 GEE 身份。 */
 export function eeAuthPlugin(): Plugin {
   const attach = (server: { middlewares: { use: (fn: typeof handle) => void } }) => {
     server.middlewares.use(handle);

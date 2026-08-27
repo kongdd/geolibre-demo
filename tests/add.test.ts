@@ -68,11 +68,13 @@ test("layersOf xyz", async () => {
 });
 
 test("visToOpts maps GEE vis / name / shown / opacity", () => {
-  const opts = visToOpts({ color: "1d4ed8", width: 2, min: 0, max: 3000, palette: "terrain" }, "DEM", false, 0.5);
+  const opts = visToOpts({ color: "1d4ed8", width: 2, min: 0, max: 3000, palette: "terrain", stretch: "log", transparentBelowMin: true }, "DEM", false, 0.5);
   assert.equal(opts.color, "#1d4ed8");
   assert.equal(opts.width, 2);
   assert.equal(opts.colormap, "terrain");
   assert.deepEqual(opts.rescale, [[0, 3000]]);
+  assert.equal(opts.stretch, "log");
+  assert.equal(opts.transparentBelowMin, true);
   assert.equal(opts.name, "DEM");
   assert.equal(opts.visible, false);
   assert.equal(opts.opacity, 0.5);

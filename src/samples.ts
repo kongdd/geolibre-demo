@@ -3,6 +3,8 @@ import { ee } from "@geolibre/plugins/earthengine";
 import { projectStore } from "./project-store";
 
 const SAMPLE = {
+  flowDirection: `${import.meta.env.BASE_URL}api/raster/hubei-flow-direction/file.tif`,
+  flowAccumulation: `${import.meta.env.BASE_URL}api/flow-accumulation/{z}/{x}/{y}?min=3000`,
   countries:
     "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
   rivers:
@@ -17,13 +19,24 @@ function addGroup(name: string, layers: GeoLibreLayer[]): GeoLibreLayer[] {
 }
 
 export async function loadDemoLayers(): Promise<string> {
-  await Map.addBasemap(["google-satellite", "osm-standard"]);
+  await Map.addBasemap(["google-satellite", "osm-standard", "esri-world-gray-canvas"]);
 
   const layers = addGroup("Natural Earth", [
     Map.addLayer(SAMPLE.countries, { fill: "#8fbc8f22", stroke: "#3d5a45", width: 0.8 }, "国家边界"),
     Map.addLayer(SAMPLE.rivers, { stroke: "#1d4ed8", width: 1.6 }, "世界河流"),
-    Map.addLayer(SAMPLE.dem, { colormap: "terrain", opacity: 0.85 }, "DEM"),
+    // Map.addLayer(SAMPLE.dem, { colormap: "terrain", opacity: 0.85 }, "DEM"),
   ]);
+  layers.push(
+    ...addGroup("湖北水文", [
+      Map.addLayer(
+        SAMPLE.flowDirection,
+        { min: 1, max: 128, colormap: "viridis", opacity: 0.55 },
+        "湖北流向",
+        false,
+      ),
+      Map.addLayer(SAMPLE.flowAccumulation, { opacity: 0.8 }, "湖北累积流"),
+    ]),
+  );
 
   await ee.Initialize();
   const layers_gee = addGroup("GEE", [

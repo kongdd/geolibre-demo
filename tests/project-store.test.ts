@@ -110,6 +110,31 @@ test("moveLayerToGroup accepts one or many layer ids", () => {
   );
 });
 
+test("moveGroup reorders a group block", () => {
+  projectStore.getState().newProject("Reorder");
+  const g1 = projectStore.getState().addGroup("G1");
+  const g2 = projectStore.getState().addGroup("G2");
+  projectStore.getState().addLayers(
+    ["a", "b", "c", "d"].map((id) => ({
+      id,
+      name: id,
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_LAYER_STYLE },
+      metadata: {},
+    })),
+  );
+  projectStore.getState().moveLayerToGroup(g1, ["a", "b"]);
+  projectStore.getState().moveLayerToGroup(g2, ["c", "d"]);
+  projectStore.getState().moveGroup(g1, { type: "group", id: g2 }, true);
+  assert.deepEqual(
+    projectStore.getState().project.layers.map((layer) => layer.id),
+    ["c", "d", "a", "b"],
+  );
+});
+
 test("load/save drop stale Earth Engine tiles", () => {
   projectStore.getState().newProject("GEE");
   projectStore.getState().addLayers([

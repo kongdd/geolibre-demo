@@ -55,8 +55,53 @@ export function pickRasterState(value: unknown): Partial<RasterLayerState> {
   return state;
 }
 
+export function transparentMinimum(value: unknown): number | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  if ((value as Record<string, unknown>).transparentBelowMin !== true) return;
+  return pickRasterState(value).rescale?.[0]?.[0];
+}
+
 function rasterMetadata(layer: GeoLibreLayer): Partial<RasterLayerState> {
   return pickRasterState(layer.metadata.rasterState);
+}
+
+type RenderResult = {
+  renderPipeline?: Array<{ module?: { name?: string }; props?: Record<string, unknown> }>;
+};
+
+type RasterManager = {
+  _renderTileFor?: (layer: { id: string }) => (data: unknown) => RenderResult | null;
+};
+
+const MINIMUM_MASK = {
+  name: "minimumMask",
+  fs: "uniform minimumMaskUniforms { float value; } minimumMask;",
+  inject: { "fs:DECKGL_FILTER_COLOR": "if (color.r < minimumMask.value) discard;" },
+  uniformTypes: { value: "f32" },
+  getUniforms: ({ value }: { value: number }) => ({ value }),
+};
+
+function installMinimumMask(control: RasterControl, thresholds: Map<string, number>): void {
+  const manager = (control as unknown as { _layerManager?: RasterManager })._layerManager;
+  if (!manager?._renderTileFor) return;
+  const original = manager._renderTileFor.bind(manager);
+  manager._renderTileFor = (layer) => {
+    const render = original(layer);
+    return (data) => {
+      const result = render(data);
+      const value = thresholds.get(layer.id);
+      if (value === undefined || !result?.renderPipeline?.length) return result;
+      const scale = Number((data as { sampleScale?: unknown }).sampleScale) || 1;
+      return {
+        ...result,
+        renderPipeline: [
+          result.renderPipeline[0]!,
+          { module: MINIMUM_MASK, props: { value: value / scale } },
+          ...result.renderPipeline.slice(1),
+        ],
+      };
+    };
+  };
 }
 
 export function isProjectRaster(layer: GeoLibreLayer): boolean {
@@ -131,6 +176,8 @@ export function createRasterAdapter(
   map.addControl(control, "top-right");
   const loading = new Map<string, string>();
   const loadedKeys = new Map<string, string>();
+  const thresholds = new Map<string, number>();
+  installMinimumMask(control, thresholds);
   let desired = new Map<string, GeoLibreLayer>();
   let disposed = false;
 
@@ -184,6 +231,11 @@ export function createRasterAdapter(
       const zoomTo = opts?.zoomTo !== false;
       const rasters = applyGroupEffects(layers, groups).filter(isProjectRaster);
       desired = new Map(rasters.map((layer) => [layer.id, layer]));
+      thresholds.clear();
+      for (const layer of rasters) {
+        const min = transparentMinimum(layer.metadata.rasterState);
+        if (min !== undefined) thresholds.set(layer.id, min);
+      }
       for (const raster of control.getRasters()) {
         if (!desired.has(raster.id)) {
           control.removeRaster(raster.id);

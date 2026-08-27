@@ -12,6 +12,9 @@ export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   base: "/project-demo/",
   plugins: [eeAuthPlugin()],
+  // Earth Engine 通过形参名解析位置参数；禁止压缩器改名。
+  esbuild: { minifyIdentifiers: false },
+  build: { minify: "esbuild" },
   server: {
     host: "127.0.0.1",
     port: 5187,

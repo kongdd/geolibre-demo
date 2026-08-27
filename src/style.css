@@ -197,6 +197,10 @@ aside section {
   cursor: grab;
 }
 
+.tree-row.group-row {
+  cursor: grab;
+}
+
 .tree-row.dragging {
   opacity: 0.45;
 }
@@ -437,6 +441,145 @@ small {
 .field input[type="color"] {
   width: 100%;
   height: 2rem;
+}
+
+.watershed-panel {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.watershed-panel[hidden],
+.watershed-panel [hidden] {
+  display: none;
+}
+
+.watershed-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+}
+
+.field.watershed-snap input {
+  width: auto;
+  justify-self: start;
+}
+
+.watershed-pick {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: end;
+}
+
+.watershed-pick button {
+  white-space: nowrap;
+}
+
+.watershed-pick label,
+.watershed-points {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.watershed-points small {
+  color: #667085;
+}
+
+.watershed-points > span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.watershed-points > button {
+  justify-self: end;
+}
+
+.watershed-point-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 11rem;
+  overflow-y: auto;
+}
+
+.watershed-point-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.1rem 0.45rem;
+  align-items: center;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: #f3f6fa;
+}
+
+.watershed-point-row.selected {
+  border-color: #8db9e8;
+  background: #eef6ff;
+  box-shadow: inset 3px 0 #3984cf;
+}
+
+.watershed-point-row > input[type="checkbox"] {
+  grid-row: 1 / 3;
+  accent-color: #3984cf;
+}
+
+.watershed-point-row > input[type="text"] {
+  grid-column: 2;
+  min-width: 0;
+  padding: 0.15rem 0.25rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-weight: 600;
+}
+
+.watershed-point-row > input[type="text"]:hover,
+.watershed-point-row > input[type="text"]:focus {
+  border-color: #9fbddd;
+  background: white;
+  outline: none;
+}
+
+.watershed-point-row > small:first-of-type {
+  grid-row: 2;
+  grid-column: 2 / 4;
+}
+
+.watershed-point-row > small:last-child {
+  grid-row: 1;
+  grid-column: 3;
+  white-space: nowrap;
+}
+
+.watershed-point-row .done {
+  color: #26733d;
+}
+
+.watershed-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.watershed-actions button {
+  min-width: 7rem;
+}
+
+.watershed-map-point {
+  width: 12px;
+  height: 12px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #d92d20;
+  box-shadow: 0 0 0 2px #d92d20, 0 1px 4px #172033;
+  pointer-events: none;
+}
+
+.watershed-map-point.preview {
+  width: 18px;
+  height: 18px;
+  border-color: #d92d20;
+  background: rgb(255 255 255 / 70%);
+  box-shadow: 0 0 0 1px white;
 }
 
 .ramp-picker {

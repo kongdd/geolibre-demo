@@ -7,6 +7,7 @@ import {
   type MapViewState,
 } from "@geolibre/core";
 import { createStore } from "zustand/vanilla";
+import { dropGroupOn, type DropTarget } from "./layer-order";
 import { sanitizeGeeProject } from "./project-io";
 
 function withId(project: GeoLibreProject): GeoLibreProject {
@@ -46,6 +47,7 @@ export interface ProjectState {
   addGroup(name: string): string;
   updateGroup(id: string, patch: Partial<LayerGroup>): void;
   removeGroup(id: string): void;
+  moveGroup(id: string, target: DropTarget, aboveInUi: boolean): void;
   moveLayerToGroup(groupId: string | undefined, layerIds: string | string[]): void;
   markSaved(): void;
 }
@@ -189,6 +191,22 @@ export const projectStore = createStore<ProjectState>((set) => ({
       },
       isDirty: true,
     })),
+
+  moveGroup: (id, target, aboveInUi) =>
+    set((state) => {
+      const moved = dropGroupOn(
+        state.project.layers,
+        state.project.layerGroups ?? [],
+        id,
+        target,
+        aboveInUi,
+      );
+      if (!moved) return state;
+      return {
+        project: { ...state.project, layers: moved.layers, layerGroups: moved.groups },
+        isDirty: true,
+      };
+    }),
 
   moveLayerToGroup: (groupId, layerIds) =>
     set((state) => {

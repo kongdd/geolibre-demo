@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pickRasterState } from "../src/raster";
+import { pickRasterState, transparentMinimum } from "../src/raster";
 
 test("pickRasterState keeps GeoLibre style fields", () => {
   const state = pickRasterState({
@@ -24,6 +24,11 @@ test("pickRasterState keeps GeoLibre style fields", () => {
     gamma: 1.4,
     nodata: "auto",
   });
+});
+
+test("transparentMinimum follows the style checkbox", () => {
+  assert.equal(transparentMinimum({ rescale: [[3000, 1e6]], transparentBelowMin: true }), 3000);
+  assert.equal(transparentMinimum({ rescale: [[3000, 1e6]], transparentBelowMin: false }), undefined);
 });
 
 test("pickRasterState drops invalid values", () => {

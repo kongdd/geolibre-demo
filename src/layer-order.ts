@@ -1,3 +1,10 @@
+import {
+  buildLayerPanelUnits,
+  reorderLayerGroupInPanel,
+  type GeoLibreLayer,
+  type LayerGroup,
+} from "@geolibre/core";
+
 const BASEMAP_KIND = "maplibre-basemap-control";
 
 export function isBasemapLayer(layer: { metadata: { sourceKind?: unknown } }): boolean {
@@ -66,4 +73,39 @@ export function dropInsertIndex(
   const target = next.indexOf(targetId);
   if (target < 0) return null;
   return aboveInUi ? target + 1 : target;
+}
+
+export type DropTarget = { type: "group" | "layer"; id: string };
+
+/** Walk `reorderLayerGroupInPanel` until `sourceId` sits above/below `target`. */
+export function dropGroupOn(
+  layers: GeoLibreLayer[],
+  groups: LayerGroup[],
+  sourceId: string,
+  target: DropTarget,
+  aboveInUi: boolean,
+): { layers: GeoLibreLayer[]; groups: LayerGroup[] } | null {
+  if (target.type === "group" && target.id === sourceId) return null;
+  let current = { layers, groups };
+  for (let i = 0; i < layers.length + groups.length + 1; i++) {
+    const units = buildLayerPanelUnits(current.layers, current.groups);
+    const srcIdx = units.findIndex((unit) => unit.groupId === sourceId);
+    const tgtIdx =
+      target.type === "group"
+        ? units.findIndex((unit) => unit.groupId === target.id)
+        : units.findIndex((unit) => unit.layers.some((layer) => layer.id === target.id));
+    if (srcIdx < 0 || tgtIdx < 0 || srcIdx === tgtIdx) return i === 0 ? null : current;
+    if (aboveInUi ? srcIdx === tgtIdx - 1 : srcIdx === tgtIdx + 1) {
+      return i === 0 ? null : current;
+    }
+    const next = reorderLayerGroupInPanel(
+      current.layers,
+      current.groups,
+      sourceId,
+      srcIdx < tgtIdx ? "down" : "up",
+    );
+    if (!next) return i === 0 ? null : current;
+    current = next;
+  }
+  return current;
 }

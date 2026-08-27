@@ -573,10 +573,21 @@ export function renderStyleEditor(): void {
     reverse.checked = reversed;
     reverse.addEventListener("change", () => commitRasterState(layer, { reversed: reverse.checked }));
 
+    const transparent = document.createElement("input");
+    transparent.type = "checkbox";
+    transparent.checked =
+      !!layer.metadata.rasterState &&
+      typeof layer.metadata.rasterState === "object" &&
+      (layer.metadata.rasterState as Record<string, unknown>).transparentBelowMin === true;
+    transparent.addEventListener("change", () =>
+      commitRasterState(layer, { transparentBelowMin: transparent.checked }),
+    );
+
     host.append(
       field("Colormap", colormapPicker(colormap, reversed, (name) => commitRasterState(layer, { colormap: name }))),
       labeledControl("Reverse", reverse),
       labeledControl("Min", min),
+      labeledControl("Below min transparent", transparent),
       labeledControl("Max", max),
       labeledControl("Stretch", stretch),
       labeledControl("Gamma", gamma),

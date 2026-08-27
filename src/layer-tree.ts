@@ -1,4 +1,4 @@
-import type { GeoLibreLayer, LayerGroup } from "@geolibre/core";
+import { buildLayerTree, type GeoLibreLayer, type LayerGroup } from "@geolibre/core";
 import { button } from "./dom";
 import { collectionKind } from "./geometry";
 import { dropInsertIndex } from "./layer-order";
@@ -138,6 +138,21 @@ function dropLayerOn(sourceId: string, target: GeoLibreLayer, aboveInUi: boolean
   if (index !== null) projectStore.getState().moveLayer(sourceId, index);
 }
 
+function bindDropLine(row: HTMLElement, onDrop: (above: boolean, dt: DataTransfer | null) => void): void {
+  row.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    const above = event.offsetY < row.clientHeight / 2;
+    row.classList.toggle("drop-above", above);
+    row.classList.toggle("drop-below", !above);
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-above", "drop-below"));
+  row.addEventListener("drop", (event) => {
+    event.preventDefault();
+    row.classList.remove("drop-above", "drop-below");
+    onDrop(event.offsetY < row.clientHeight / 2, event.dataTransfer);
+  });
+}
+
 function bindLayerDrag(row: HTMLElement, layer: GeoLibreLayer): void {
   const selected = projectStore.getState().selectedLayerId === layer.id;
   row.draggable = selected;
@@ -152,18 +167,38 @@ function bindLayerDrag(row: HTMLElement, layer: GeoLibreLayer): void {
   row.addEventListener("dragend", () => {
     row.classList.remove("dragging", "drop-above", "drop-below");
   });
-  row.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    const above = event.offsetY < row.clientHeight / 2;
-    row.classList.toggle("drop-above", above);
-    row.classList.toggle("drop-below", !above);
+  bindDropLine(row, (above, dt) => {
+    const groupId = dt?.getData("text/group-id");
+    if (groupId) {
+      projectStore.getState().moveGroup(groupId, { type: "layer", id: layer.id }, above);
+      return;
+    }
+    const sourceId = dt?.getData("text/layer-id");
+    if (sourceId) dropLayerOn(sourceId, layer, above);
   });
-  row.addEventListener("dragleave", () => row.classList.remove("drop-above", "drop-below"));
-  row.addEventListener("drop", (event) => {
-    event.preventDefault();
-    row.classList.remove("drop-above", "drop-below");
-    const sourceId = event.dataTransfer?.getData("text/layer-id");
-    if (sourceId) dropLayerOn(sourceId, layer, event.offsetY < row.clientHeight / 2);
+}
+
+function bindGroupDrag(row: HTMLElement, group: LayerGroup): void {
+  row.draggable = true;
+  row.addEventListener("dragstart", (event) => {
+    if ((event.target as HTMLElement).closest("button, input")) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer?.setData("text/group-id", group.id);
+    row.classList.add("dragging");
+  });
+  row.addEventListener("dragend", () => {
+    row.classList.remove("dragging", "drop-above", "drop-below");
+  });
+  bindDropLine(row, (above, dt) => {
+    const groupId = dt?.getData("text/group-id");
+    if (groupId) {
+      projectStore.getState().moveGroup(groupId, { type: "group", id: group.id }, above);
+      return;
+    }
+    const sourceId = dt?.getData("text/layer-id");
+    if (sourceId) projectStore.getState().moveLayerToGroup(group.id, sourceId);
   });
 }
 
@@ -200,6 +235,43 @@ function createLayerRow(layer: GeoLibreLayer, depth = 0): HTMLDivElement {
   return row;
 }
 
+function createGroupRow(group: LayerGroup): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "tree-row group-row";
+  row.addEventListener("contextmenu", (event) => openGroupContextMenu(group, event));
+  bindGroupDrag(row, group);
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "tree-toggle";
+  toggle.textContent = group.collapsed ? "▸" : "▾";
+  toggle.title = group.collapsed ? "展开" : "折叠";
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    projectStore.getState().updateGroup(group.id, { collapsed: !group.collapsed });
+  });
+
+  const folder = document.createElement("img");
+  folder.className = "legend-icon";
+  folder.src = "icons/folder.svg";
+  folder.alt = "";
+
+  const name = document.createElement("span");
+  name.className = "grow";
+  name.textContent = group.name;
+  name.title = group.name;
+  row.append(
+    treeGutter(toggle),
+    treeCheckbox(group.visible, (checked) =>
+      projectStore.getState().updateGroup(group.id, { visible: checked }),
+    ),
+    folder,
+    name,
+    rowDelete("删除组", () => projectStore.getState().removeGroup(group.id)),
+  );
+  return row;
+}
+
 function rowDelete(title: string, action: () => void): HTMLButtonElement {
   const del = button("×", action, title);
   del.className = "row-del";
@@ -208,57 +280,15 @@ function rowDelete(title: string, action: () => void): HTMLButtonElement {
 
 export function renderLayers(): void {
   const { project } = projectStore.getState();
-  const layers = [...project.layers].reverse();
-  const groups = new Map((project.layerGroups ?? []).map((group) => [group.id, group]));
-  const renderedGroups = new Set<string>();
   host.replaceChildren();
-
-  const appendGroup = (group: LayerGroup) => {
-    if (renderedGroups.has(group.id)) return;
-    renderedGroups.add(group.id);
-    const children = layers.filter((layer) => layer.groupId === group.id);
-    const row = document.createElement("div");
-    row.className = "tree-row group-row";
-    row.addEventListener("contextmenu", (event) => openGroupContextMenu(group, event));
-
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "tree-toggle";
-    toggle.textContent = group.collapsed ? "▸" : "▾";
-    toggle.title = group.collapsed ? "展开" : "折叠";
-    toggle.addEventListener("click", (event) => {
-      event.stopPropagation();
-      projectStore.getState().updateGroup(group.id, { collapsed: !group.collapsed });
-    });
-
-    const folder = document.createElement("img");
-    folder.className = "legend-icon";
-    folder.src = "icons/folder.svg";
-    folder.alt = "";
-
-    const name = document.createElement("span");
-    name.className = "grow";
-    name.textContent = group.name;
-    name.title = group.name;
-    row.append(
-      treeGutter(toggle),
-      treeCheckbox(group.visible, (checked) =>
-        projectStore.getState().updateGroup(group.id, { visible: checked }),
-      ),
-      folder,
-      name,
-      rowDelete("删除组", () => projectStore.getState().removeGroup(group.id)),
-    );
-    host.append(row);
-    if (!group.collapsed) {
-      for (const layer of children) host.append(createLayerRow(layer, 1));
+  for (const item of buildLayerTree(project.layers, project.layerGroups ?? [])) {
+    if (item.kind === "group") {
+      host.append(createGroupRow(item.group));
+      if (!item.group.collapsed) {
+        for (const layer of item.children) host.append(createLayerRow(layer, 1));
+      }
+    } else {
+      host.append(createLayerRow(item.layer));
     }
-  };
-
-  for (const layer of layers) {
-    const group = layer.groupId ? groups.get(layer.groupId) : undefined;
-    if (group) appendGroup(group);
-    else host.append(createLayerRow(layer));
   }
-  for (const group of [...groups.values()].reverse()) appendGroup(group);
 }

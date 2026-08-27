@@ -19,7 +19,7 @@ import {
   visToOpts,
 } from "@geolibre/plugins/earthengine";
 import { isGeometryLayer } from "../plugins/geometry/geometry";
-import { projectStore } from "../src/project-store";
+import { projectStore } from "../src/project/store";
 
 test("sniff url / hint", () => {
   assert.equal(sniff("https://a/{z}/{x}/{y}.png"), "xyz");

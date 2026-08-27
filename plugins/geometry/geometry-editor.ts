@@ -36,8 +36,8 @@ import {
   setDrawMode,
   type DrawState,
 } from "./geometry-draw";
-import { contextMenuButton, showContextMenu } from "../../src/layer-tree";
-import { projectStore } from "../../src/project-store";
+import { contextMenuButton, showContextMenu } from "geolibre-lite/layer-tree";
+import { projectStore } from "geolibre-lite/project/store";
 
 const SOURCE = "gee-geom";
 const DRAFT = "gee-draft";

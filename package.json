@@ -1,7 +1,15 @@
 {
   "name": "geolibre-lite",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "exports": {
+    "./dom": "./src/dom.ts",
+    "./layer-tree": "./src/layer-tree.ts",
+    "./project/filename": "./src/project/filename.ts",
+    "./project/store": "./src/project/store.ts",
+    "./raster": "./src/raster.ts",
+    "./vector": "./src/vector.ts"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader native",
@@ -14,7 +22,6 @@
     "@geolibre/core": "^2.7.0",
     "@geolibre/map": "^2.7.0",
     "@google/earthengine": "^1.7.41",
-    "@spatialhydro/watershed": "file:/mnt/z/GitHub/kongdd/SpatialHydro/crates/watershed/npm",
     "ee-auth": "file:/mnt/z/GitHub/gee-hydro/gee-helper.ts/packages/ee-auth",
     "maplibre-gl": "^6.3.0",
     "maplibre-gl-basemap-control": "^0.14.0",

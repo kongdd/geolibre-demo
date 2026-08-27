@@ -1,6 +1,6 @@
 import { applyGroupEffects, type GeoLibreLayer } from "@geolibre/core";
 import { COLORMAP_OPTIONS, COLORMAP_ROW_COUNT, colormapsPngUrl } from "maplibre-gl-raster";
-import { projectStore } from "./project-store";
+import { projectStore } from "./project/store";
 import { isGeeRaster, type EeVis } from "@geolibre/plugins/earthengine";
 import { isProjectRaster, pickRasterState } from "./raster";
 

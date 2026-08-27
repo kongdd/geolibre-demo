@@ -14,7 +14,7 @@ import {
   polygonFeature,
   rectangleRing,
 } from "../geometry/geometry";
-import { projectStore } from "../../src/project-store";
+import { projectStore } from "geolibre-lite/project/store";
 import {
   ee,
   encodeExpression,
@@ -30,8 +30,8 @@ import {
 } from "./ee";
 import { annualEt } from "./PMLV2";
 import { PENDING_EE_TILES } from "./run";
-import { createLocalRasterLayer, createRemoteRasterLayer } from "../../src/raster";
-import { createVectorLayer, readVectorFile } from "../../src/vector";
+import { createLocalRasterLayer, createRemoteRasterLayer } from "geolibre-lite/raster";
+import { createVectorLayer, readVectorFile } from "geolibre-lite/vector";
 
 export type AddKind = "geojson" | "xyz" | "cog";
 export type AddSrc = string | File | FeatureCollection | Feature | Geometry | ee.Object | ee.Computed;

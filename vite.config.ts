@@ -34,10 +34,6 @@ export default defineConfig({
       "@google/earthengine": fileURLToPath(
         new URL("./node_modules/@google/earthengine/build/browser.js", import.meta.url),
       ),
-      "@geolibre/core": fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
-      "@geolibre/map/headless": fileURLToPath(
-        new URL("../../packages/map/src/headless.ts", import.meta.url),
-      ),
       "@geolibre/plugins/basemap-thumbnails": fileURLToPath(
         new URL("./plugins/basemap-thumbnails.ts", import.meta.url),
       ),

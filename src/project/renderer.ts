@@ -6,11 +6,11 @@ import {
   basemapNativeIds,
   isBasemapLayer,
   occludedBasemapIds,
-} from "./layer-order";
-import { projectStore } from "./project-store";
+} from "../layer-order";
+import { projectStore } from "./store";
 import { isGeometryLayer, raiseGeometryLayers } from "@geolibre/plugins/geometry";
 import { syncGeeRaster } from "@geolibre/plugins/earthengine";
-import { isProjectRaster, type RasterAdapter } from "./raster";
+import { isProjectRaster, type RasterAdapter } from "../raster";
 
 /** Control already called map.setStyle; skip the renderer's second reload. */
 let liveStyleUrl: string | undefined;

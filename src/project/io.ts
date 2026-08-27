@@ -4,13 +4,13 @@ import {
   type GeoLibreProject,
 } from "@geolibre/core";
 import type { FeatureCollection } from "geojson";
-import { PENDING_EE_TILES } from "../plugins/earthengine/run";
-import { getRasterAsset } from "./assets";
+import { PENDING_EE_TILES } from "../../plugins/earthengine/run";
+import { getRasterAsset } from "../assets";
 import {
   createProjectFileKey,
   PROJECT_SUFFIX,
   projectFileStem,
-} from "./project-filename";
+} from "./filename";
 
 const PROJECT_API = `${import.meta.env?.BASE_URL ?? "/project-demo/"}api/projects`;
 const ASSET_NAME = /^[\p{L}\p{N}._-]{1,160}$/u;
@@ -61,23 +61,34 @@ export function sanitizeGeeProject(project: GeoLibreProject): GeoLibreProject {
   };
 }
 
-function validAssetName(value: unknown): value is string {
-  return typeof value === "string" && value !== "." && value !== ".." && ASSET_NAME.test(value);
+function validAssetSegment(value: string): boolean {
+  return value !== "." && value !== ".." && ASSET_NAME.test(value);
+}
+
+/** 资产可位于 data/ 的子目录（如 Basins/）；逐段校验，禁止路径穿越。 */
+function validAssetPath(value: unknown): value is string {
+  return typeof value === "string" && value.split("/").every(validAssetSegment);
 }
 
 function assetName(
   layer: GeoLibreProject["layers"][number],
   extension: ".geojson" | ".tif" | ".tiff",
 ): string {
-  return `${projectFileStem(layer.name)}${extension}`;
+  // 流域提取结果（Basin 面与 Pour 点）统一存放到 data/Basins/
+  const dir = typeof layer.metadata.watershedName === "string" ? "Basins/" : "";
+  return `${dir}${projectFileStem(layer.name)}${extension}`;
+}
+
+function assetPath(key: string, file: string): string {
+  return `/${encodeURIComponent(key)}/data/${file.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function assetUrl(key: string, file: string): string {
-  return `${PROJECT_API}/${encodeURIComponent(key)}/data/${encodeURIComponent(file)}`;
+  return `${PROJECT_API}${assetPath(key, file)}`;
 }
 
 async function uploadAsset(key: string, file: string, body: BodyInit, type: string): Promise<void> {
-  await request(`/${encodeURIComponent(key)}/data/${encodeURIComponent(file)}`, {
+  await request(assetPath(key, file), {
     method: "PUT",
     headers: { "Content-Type": type },
     body,
@@ -104,7 +115,7 @@ export async function prepareProjectForStorage(
 
   for (const layer of clean.layers) {
     if (layer.geojson) {
-      const managed = validAssetName(layer.metadata.projectAsset);
+      const managed = validAssetPath(layer.metadata.projectAsset);
       if (managed || !sourceUrl(layer)) {
         if (!key) throw new Error(`请先保存到 Remote：${layer.name} 尚无数据文件路径`);
         const file = reserve(assetName(layer, ".geojson"), layer);
@@ -138,7 +149,7 @@ export async function prepareProjectForStorage(
       continue;
     }
 
-    const managed = validAssetName(layer.metadata.projectAsset)
+    const managed = validAssetPath(layer.metadata.projectAsset)
       ? layer.metadata.projectAsset
       : null;
     const remoteSource = sourceUrl(layer);

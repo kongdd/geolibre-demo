@@ -123,6 +123,12 @@ for (const layer of saved.layers.filter((value: { metadata?: { watershedRole?: s
   assert.equal(layer.geojson, undefined);
   assert.match(layer.source.url, new RegExp(`/projects/${key}/data/.+\\.geojson$`));
 }
+page.once("dialog", (dialog) => void dialog.accept());
+await page.click(".watershed-point-delete");
+await page.waitForFunction(() => !document.querySelector(".watershed-point-delete"));
+const deletedTree = (await page.locator("#layers").textContent()) ?? "";
+assert(!deletedTree.includes("流域 1"));
+assert(!deletedTree.includes("Pour_出水口 1"));
 await page.evaluate((projectKey) =>
   fetch(`/project-demo/api/projects/${encodeURIComponent(projectKey)}`, { method: "DELETE" }), key);
 assert.equal(errors.length, 0, errors.join("\n"));

@@ -3,7 +3,7 @@ import type {
   FeatureCollection as GeoJSONFeatureCollection,
   Geometry,
 } from "geojson";
-import { projectStore } from "../../src/project-store";
+import { projectStore } from "geolibre-lite/project/store";
 import { isCloudExpression, PENDING_EE_TILES, stripMapToken } from "./run";
 
 export namespace ee {

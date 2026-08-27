@@ -13,7 +13,7 @@ import {
   writeStoredAsset,
   writeStoredProject,
 } from "../plugins/projects/plugin";
-import { PROJECT_SUFFIX } from "../src/project-filename";
+import { PROJECT_SUFFIX } from "../src/project/filename";
 
 test("remote project storage keeps project and data in separate files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "geolibre-projects-"));
@@ -29,10 +29,22 @@ test("remote project storage keeps project and data in separate files", async ()
     style: { ...DEFAULT_LAYER_STYLE },
     metadata: { projectAsset: "basin.geojson" },
   });
+  project.layers.push({
+    id: "pour",
+    name: "Pour_出水口",
+    type: "geojson",
+    source: { type: "geojson", url: `/api/projects/${key}/data/Basins/pour.geojson` },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: { projectAsset: "Basins/pour.geojson" },
+  });
   const content = serializeProject(project);
   const asset = Buffer.from('{"type":"FeatureCollection","features":[]}');
   try {
     await writeStoredAsset(key, "basin.geojson", asset, directory);
+    await writeStoredAsset(key, "Basins/pour.geojson", asset, directory);
+    await writeStoredAsset(key, "Basins/stale.geojson", asset, directory);
     await writeStoredAsset(key, "stale.geojson", asset, directory);
     await writeStoredProject(key, content, directory);
     await symlink(
@@ -47,7 +59,9 @@ test("remote project storage keeps project and data in separate files", async ()
     });
     assert.equal(await readStoredProject(key, directory), content);
     assert.deepEqual(await readStoredAsset(key, "basin.geojson", directory), asset);
+    assert.deepEqual(await readStoredAsset(key, "Basins/pour.geojson", directory), asset);
     await assert.rejects(() => readStoredAsset(key, "stale.geojson", directory));
+    await assert.rejects(() => readStoredAsset(key, "Basins/stale.geojson", directory));
     await deleteStoredProject(key, directory);
     assert.deepEqual(await listStoredProjects(directory), []);
     await assert.rejects(() => readStoredAsset(key, "basin.geojson", directory));
@@ -85,6 +99,11 @@ test("project API route accepts data files and rejects path traversal", () => {
     key: "丹江",
     asset: "a.geojson",
   });
+  assert.deepEqual(projectRoute("/project-demo/api/projects/demo/data/Basins/a.geojson"), {
+    key: "demo",
+    asset: "Basins/a.geojson",
+  });
   assert.equal(projectRoute("/project-demo/api/projects/..%2Fsecret"), null);
   assert.equal(projectRoute("/project-demo/api/projects/demo/data/..%2Fsecret"), null);
+  assert.equal(projectRoute("/project-demo/api/projects/demo/data/Basins/..%2Fsecret"), null);
 });

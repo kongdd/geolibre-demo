@@ -35,10 +35,10 @@ import {
   readProjectFile,
   readRemoteProject,
   saveRemoteProject,
-} from "./project-io";
-import { createProjectFileKey, PROJECT_SUFFIX } from "./project-filename";
-import { createProjectRenderer } from "./project-renderer";
-import { projectStore } from "./project-store";
+} from "./project/io";
+import { createProjectFileKey, PROJECT_SUFFIX } from "./project/filename";
+import { createProjectRenderer } from "./project/renderer";
+import { projectStore } from "./project/store";
 import { createRasterAdapter, isProjectRaster, rasterAssetId } from "./raster";
 import { loadDemoLayers } from "./samples";
 import {

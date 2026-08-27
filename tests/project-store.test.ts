@@ -8,8 +8,8 @@ import {
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PENDING_EE_TILES } from "../plugins/earthengine/run";
-import { sanitizeGeeProject } from "../src/project-io";
-import { projectStore } from "../src/project-store";
+import { sanitizeGeeProject } from "../src/project/io";
+import { projectStore } from "../src/project/store";
 
 test("project round-trip preserves layers, groups, style and view", () => {
   const store = projectStore.getState();
@@ -83,10 +83,14 @@ test("addLayers writes once", () => {
   );
 });
 
-test("declared group order controls layer insertion", () => {
+test("new groups and their layers are added on top", () => {
   projectStore.getState().newProject("Order");
-  const top = projectStore.getState().addGroup("Top");
   const bottom = projectStore.getState().addGroup("Bottom");
+  const top = projectStore.getState().addGroup("Top");
+  assert.deepEqual(
+    projectStore.getState().project.layerGroups?.map((group) => group.name),
+    ["Top", "Bottom"],
+  );
   const layer = (id: string, groupId: string): GeoLibreLayer => ({
     id,
     name: id,

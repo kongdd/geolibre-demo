@@ -1,10 +1,10 @@
-import { createWatershedExtractor, type Outlet } from "@spatialhydro/watershed";
+import { createWatershedExtractor, type Outlet } from "./client";
 import type { GeoLibreLayer } from "@geolibre/core";
 import type { FeatureCollection } from "geojson";
 import { Marker, type Map as MapLibreMap, type MapMouseEvent } from "maplibre-gl";
-import { setStatus } from "../../src/dom";
-import { projectStore } from "../../src/project-store";
-import { createVectorLayer } from "../../src/vector";
+import { setStatus } from "geolibre-lite/dom";
+import { projectStore } from "geolibre-lite/project/store";
+import { createVectorLayer } from "geolibre-lite/vector";
 
 export interface WatershedPlugin {
   cancel(): boolean;
@@ -94,6 +94,41 @@ export function draftsFromLayers(layers: GeoLibreLayer[]): WatershedDraft[] {
 
 function featureId(feature: FeatureCollection["features"][number]): number {
   return Number(feature.properties?.id ?? feature.properties?.VALUE);
+}
+
+export interface WatershedDeletion {
+  name: string;
+  removeLayerIds: string[];
+  basinUpdates: Array<{ id: string; geojson: FeatureCollection }>;
+}
+
+export function watershedDeletion(
+  layers: GeoLibreLayer[],
+  key: string,
+): WatershedDeletion | null {
+  const pour = layers.find((layer) => layer.metadata.pourPointKey === key);
+  if (!pour) return null;
+  const rawName = pour.metadata.watershedName;
+  const name = typeof rawName === "string" ? rawName : pour.name;
+  const outlet = pour.geojson?.features.find((feature) => feature.geometry?.type === "Point");
+  const outletId = outlet ? featureId(outlet) : NaN;
+  const removeLayerIds = [pour.id];
+  const basinUpdates: WatershedDeletion["basinUpdates"] = [];
+
+  if (typeof rawName === "string" && Number.isFinite(outletId)) {
+    for (const layer of layers) {
+      if (layer.metadata.watershedRole !== "basin" || layer.metadata.watershedName !== rawName) {
+        continue;
+      }
+      const geojson = layer.geojson;
+      if (!geojson) continue;
+      const features = geojson.features.filter((feature) => featureId(feature) !== outletId);
+      if (features.length === geojson.features.length) continue;
+      if (features.length) basinUpdates.push({ id: layer.id, geojson: { ...geojson, features } });
+      else removeLayerIds.push(layer.id);
+    }
+  }
+  return { name, removeLayerIds, basinUpdates };
 }
 
 function nameFeatures(
@@ -278,14 +313,31 @@ export function bindWatershedPlugin(
           selected.ariaLabel = `提取 ${next}`;
           renameAsset(draft.key, next);
         });
+        coordinates.className = "coordinates";
         coordinates.textContent = `${draft.lon.toFixed(3)}, ${draft.lat.toFixed(3)}`;
         status.textContent = draft.areaKm2
           ? `${draft.areaKm2.toLocaleString("zh-CN", { maximumFractionDigits: 1 })} km²`
           : draft.extracted
             ? "已提取"
             : "待提取";
-        status.className = draft.extracted ? "done" : "";
+        status.className = `status${draft.extracted ? " done" : ""}`;
         row.append(selected, name, coordinates, status);
+        if (draft.extracted) {
+          const deleteButton = document.createElement("button");
+          deleteButton.type = "button";
+          deleteButton.className = "watershed-point-delete";
+          deleteButton.textContent = "删除";
+          deleteButton.ariaLabel = `删除流域 ${draft.name}`;
+          deleteButton.addEventListener("click", () => {
+            const state = projectStore.getState();
+            const deletion = watershedDeletion(state.project.layers, draft.key);
+            if (!deletion || !confirm(`删除流域“${deletion.name}”？`)) return;
+            for (const { id, geojson } of deletion.basinUpdates) state.updateLayer(id, { geojson });
+            for (const id of deletion.removeLayerIds) state.removeLayer(id);
+            setStatus(`已删除流域“${deletion.name}”`);
+          });
+          row.append(deleteButton);
+        }
         return row;
       }),
     );

@@ -3,8 +3,8 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 import { BasemapControl } from "maplibre-gl-basemap-control";
 import { installBasemapThumbnails } from "@geolibre/plugins/basemap-thumbnails";
 import { basemapInsertIndex } from "./layer-order";
-import { noteLiveStyle } from "./project-renderer";
-import { projectStore } from "./project-store";
+import { noteLiveStyle } from "./project/renderer";
+import { projectStore } from "./project/store";
 
 function dropBasemapLayers(keepId?: string): void {
   for (const layer of projectStore.getState().project.layers) {

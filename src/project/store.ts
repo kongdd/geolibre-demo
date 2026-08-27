@@ -7,8 +7,8 @@ import {
   type MapViewState,
 } from "@geolibre/core";
 import { createStore } from "zustand/vanilla";
-import { dropGroupOn, type DropTarget } from "./layer-order";
-import { sanitizeGeeProject } from "./project-io";
+import { dropGroupOn, type DropTarget } from "../layer-order";
+import { sanitizeGeeProject } from "./io";
 
 function withId(project: GeoLibreProject): GeoLibreProject {
   return project.id ? project : { ...project, id: crypto.randomUUID() };
@@ -177,8 +177,8 @@ export const projectStore = createStore<ProjectState>((set) => ({
       project: {
         ...state.project,
         layerGroups: [
-          ...(state.project.layerGroups ?? []),
           { id, name: name.trim() || "Group", collapsed: false, visible: true, opacity: 1 },
+          ...(state.project.layerGroups ?? []),
         ],
       },
       isDirty: true,

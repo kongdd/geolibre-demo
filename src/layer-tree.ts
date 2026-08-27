@@ -2,7 +2,7 @@ import { buildLayerTree, type GeoLibreLayer, type LayerGroup } from "@geolibre/c
 import { collectionKind } from "@geolibre/plugins/geometry";
 import { button } from "./dom";
 import { dropInsertIndex } from "./layer-order";
-import { projectStore } from "./project-store";
+import { projectStore } from "./project/store";
 import { openLayerStyle, type LayerUiActions } from "./style-editor";
 
 let host: HTMLDivElement;

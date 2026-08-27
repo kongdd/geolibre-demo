@@ -25,7 +25,7 @@ project-renderer
 MapLibre / Raster / GEE / Geometry / Watershed
 ```
 
-- UI 先更新 `src/project-store.ts`，再由 `src/project-renderer.ts` 同步地图。
+- UI 先更新 `src/project/store.ts`，再由 `src/project/renderer.ts` 同步地图。
 - 不要在 UI 中维护第二套图层状态，也不要只调用 MapLibre 而不更新 store。
 - COG、本地 GeoTIFF、GEE、几何和流域图层有独立同步路径；修改前先确认归属。
 - MapLibre 直接调用仅限初始化、控件、交互和 renderer/plugin 集成边界。

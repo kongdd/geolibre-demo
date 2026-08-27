@@ -5,7 +5,7 @@ import {
   colormapsPngUrl,
 } from "maplibre-gl-raster";
 import { button, field, labeledControl } from "./dom";
-import { projectStore } from "./project-store";
+import { projectStore } from "./project/store";
 import { fetchEeBandsForLayer, isGeeRaster, type EeVis } from "@geolibre/plugins/earthengine";
 import { isProjectRaster, pickRasterState } from "./raster";
 

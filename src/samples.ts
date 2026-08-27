@@ -1,5 +1,5 @@
 import { ee } from "@geolibre/plugins/earthengine";
-import { projectStore } from "./project-store";
+import { projectStore } from "./project/store";
 
 const HYDRO_BOUNDS: [number, number, number, number] = [105.6292, 28.8275, 116.745, 34.5483];
 

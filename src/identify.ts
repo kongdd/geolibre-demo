@@ -4,7 +4,7 @@ import * as maplibregl from "maplibre-gl";
 import { isGeeRaster, sampleGeeLayer } from "@geolibre/plugins/earthengine";
 import { isGeometryDrawing, isGeometryLayer } from "@geolibre/plugins/geometry";
 import { isBasemapLayer } from "./layer-order";
-import { projectStore } from "./project-store";
+import { projectStore } from "./project/store";
 import { isProjectRaster, type RasterAdapter } from "./raster";
 
 const GEOM_STYLE_IDS = ["gee-geom-fill", "gee-geom-line"];

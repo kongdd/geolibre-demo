@@ -13,11 +13,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseProject } from "@geolibre/core";
 import type { Plugin } from "vite";
-import { PROJECT_SUFFIX } from "../../src/project-filename.ts";
+import { PROJECT_SUFFIX } from "geolibre-lite/project/filename";
 
 const PROJECT_DIR = fileURLToPath(new URL("../../public/projects/", import.meta.url));
 const PROJECT_BODY_LIMIT = 10 * 1024 * 1024;
@@ -41,15 +41,20 @@ function valid(value: string, pattern: RegExp): boolean {
   return value !== "." && value !== ".." && pattern.test(value);
 }
 
+/** 资产可位于 data/ 的子目录（如 Basins/）；逐段校验，禁止路径穿越。 */
+function validAssetPath(value: string): boolean {
+  return value.split("/").every((segment) => valid(segment, ASSET_NAME));
+}
+
 export function projectRoute(pathname: string): ProjectRoute | null {
   const match = pathname
     .replace(/\/+$/, "")
-    .match(/^(?:\/project-demo)?\/api\/projects(?:\/([^/]+)(?:\/data\/([^/]+))?)?$/);
+    .match(/^(?:\/project-demo)?\/api\/projects(?:\/([^/]+)(?:\/data\/(.+))?)?$/);
   if (!match) return null;
   try {
     const key = match[1] ? decodeURIComponent(match[1]) : undefined;
     const asset = match[2] ? decodeURIComponent(match[2]) : undefined;
-    if ((key && !valid(key, PROJECT_KEY)) || (asset && !valid(asset, ASSET_NAME))) return null;
+    if ((key && !valid(key, PROJECT_KEY)) || (asset && !validAssetPath(asset))) return null;
     return { key, asset };
   } catch {
     return null;
@@ -69,8 +74,8 @@ function projectDataPath(directory: string, key: string): string {
 }
 
 function assetPath(directory: string, key: string, asset: string): string {
-  if (!valid(asset, ASSET_NAME)) {
-    throw Object.assign(new Error("invalid asset name"), { status: 400 });
+  if (!validAssetPath(asset)) {
+    throw Object.assign(new Error("invalid asset path"), { status: 400 });
   }
   return join(projectDataPath(directory, key), asset);
 }
@@ -119,6 +124,23 @@ export async function readStoredProject(key: string, directory = PROJECT_DIR): P
   return readFile(projectPath(directory, key), "utf8");
 }
 
+async function listAssetFiles(dir: string, prefix = ""): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      return entry.isDirectory() ? listAssetFiles(join(dir, entry.name), rel) : [rel];
+    }),
+  );
+  return files.flat();
+}
+
 async function pruneStoredAssets(
   key: string,
   project: ReturnType<typeof parseProject>,
@@ -127,20 +149,17 @@ async function pruneStoredAssets(
   const keep = new Set<string>();
   for (const layer of project.layers) {
     const asset = layer.metadata.projectAsset;
-    if (typeof asset === "string" && valid(asset, ASSET_NAME)) keep.add(asset);
+    if (typeof asset === "string" && validAssetPath(asset)) keep.add(asset);
     const match = typeof layer.source.url === "string"
-      ? layer.source.url.match(/\/data\/([^/?#]+)$/)
+      ? layer.source.url.match(/\/data\/(.+)$/)
       : null;
     if (match) {
       const file = decodeURIComponent(match[1]!);
-      if (valid(file, ASSET_NAME)) keep.add(file);
+      if (validAssetPath(file)) keep.add(file);
     }
   }
   const data = projectDataPath(directory, key);
-  const files = await readdir(data).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  });
+  const files = await listAssetFiles(data);
   await Promise.all(files.filter((file) => !keep.has(file)).map((file) => unlink(join(data, file))));
 }
 
@@ -178,7 +197,7 @@ export async function writeStoredAsset(
   directory = PROJECT_DIR,
 ): Promise<void> {
   const path = assetPath(directory, key, asset);
-  await mkdir(projectDataPath(directory, key), { recursive: true });
+  await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   const file = await open(temporary, "wx");
   let size = 0;

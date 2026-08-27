@@ -8,10 +8,15 @@
 - `@geolibre/core` 的 Project/Layer/Group/Style
 - `@geolibre/map/headless` 的图层同步
 
+## 安装
+
 ```bash
+cargo install --git https://github.com/kongdd/watershed --bin watershed_server
 npm install
 npm run dev
 ```
+
+`watershed_server` 默认安装到 `~/.cargo/bin/`；运行前需设置 `SPATIALHYDRO_DATA` 指向流向、汇流累积量和拓扑索引所在目录。
 
 - Project 默认保存为 `public/projects/<ProjectName>.geolibre.json`；旧 UUID 文件在下次保存时自动迁移，同名新 Project 须先改名。
 - Project 仅保存配置与数据路径；本地数据独立写入 `public/projects/<project-key>/data/`。

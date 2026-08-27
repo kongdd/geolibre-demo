@@ -126,6 +126,7 @@ main {
 }
 
 aside {
+  position: relative;
   z-index: 1;
   min-height: 0;
   display: flex;
@@ -394,6 +395,38 @@ small {
   cursor: pointer;
 }
 
+.project-dialog {
+  width: min(34rem, calc(100% - 2rem));
+  border: 1px solid #c8ced8;
+  border-radius: 0.4rem;
+}
+
+.project-dialog::backdrop {
+  background: #0004;
+}
+
+.project-dialog h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.project-dialog select {
+  width: 100%;
+  min-height: 14rem;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.dialog-actions .danger {
+  margin-right: auto;
+  color: #a22929;
+}
+
 .context-menu {
   position: fixed;
   z-index: 10;
@@ -446,6 +479,42 @@ small {
 .watershed-panel {
   display: grid;
   gap: 0.7rem;
+  background: white;
+}
+
+.watershed-panel .section-title {
+  margin-bottom: 0;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #e5e9ef;
+}
+
+.watershed-panel .section-title button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  color: #667085;
+}
+
+.watershed-panel input:not([type="checkbox"], [type="color"]),
+.watershed-panel select,
+.watershed-panel textarea {
+  min-height: 2.15rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #b8c0cc;
+  border-radius: 0.35rem;
+  background: white;
+  color: #172033;
+}
+
+.watershed-panel input:not([type="checkbox"], [type="color"]):focus,
+.watershed-panel select:focus,
+.watershed-panel textarea:focus {
+  border-color: #3984cf;
+  outline: 2px solid rgb(57 132 207 / 18%);
+  outline-offset: 0;
 }
 
 .watershed-panel[hidden],
@@ -469,6 +538,8 @@ small {
   grid-template-columns: 1fr auto;
   gap: 0.4rem;
   align-items: end;
+  padding-top: 0.15rem;
+  border-top: 1px solid #eef1f4;
 }
 
 .watershed-pick button {
@@ -562,6 +633,19 @@ small {
 
 .watershed-actions button {
   min-width: 7rem;
+  border-color: #256fba;
+  background: #287dc9;
+  color: white;
+  font-weight: 600;
+}
+
+.watershed-actions button:hover {
+  background: #216caf;
+}
+
+.watershed-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .watershed-map-point {
@@ -685,6 +769,8 @@ small {
 
 .map-stage {
   position: relative;
+  z-index: 0;
+  isolation: isolate;
 }
 
 .geom-bar {

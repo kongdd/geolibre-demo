@@ -1,6 +1,8 @@
 dist
 *lock*
 images
+public/projects/*.geolibre.json
+public/projects/*/
 
 *.tif
 shp

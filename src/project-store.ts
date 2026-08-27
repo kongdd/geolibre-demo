@@ -19,6 +19,28 @@ function createProject(name: string): GeoLibreProject {
   return withId(createEmptyProject(name, { basemapStyleUrl: `${base}style.json` }));
 }
 
+function insertByGroupOrder(
+  layers: GeoLibreLayer[],
+  additions: GeoLibreLayer[],
+  groups: LayerGroup[],
+): GeoLibreLayer[] {
+  const order = new Map(groups.map((group, index) => [group.id, index]));
+  const result = [...layers];
+  for (const layer of additions) {
+    const rank = layer.groupId ? order.get(layer.groupId) : undefined;
+    if (rank === undefined) {
+      result.push(layer);
+      continue;
+    }
+    const index = result.findIndex((item) => {
+      const itemRank = item.groupId ? order.get(item.groupId) : undefined;
+      return itemRank !== undefined && itemRank < rank;
+    });
+    result.splice(index < 0 ? result.length : index, 0, layer);
+  }
+  return normalizeGroupContiguity(result);
+}
+
 function sameView(a: MapViewState, b: MapViewState): boolean {
   return (
     a.center[0] === b.center[0] &&
@@ -34,7 +56,7 @@ export interface ProjectState {
   isDirty: boolean;
   selectedLayerId: string | null;
   newProject(name?: string): void;
-  loadProject(project: GeoLibreProject): void;
+  loadProject(project: GeoLibreProject, isDirty?: boolean): void;
   setProjectName(name: string): void;
   setMapView(view: MapViewState): void;
   setBasemapStyleUrl(url: string): void;
@@ -53,15 +75,15 @@ export interface ProjectState {
 }
 
 export const projectStore = createStore<ProjectState>((set) => ({
-  project: createProject("Map Project Demo"),
+  project: createProject("十堰山洪预报"),
   isDirty: false,
   selectedLayerId: null,
 
   newProject: (name = "Untitled Project") =>
-    set({ project: createProject(name), isDirty: false, selectedLayerId: null }),
+    set({ project: createProject(name), isDirty: true, selectedLayerId: null }),
 
-  loadProject: (project) =>
-    set({ project: withId(sanitizeGeeProject(project)), isDirty: false, selectedLayerId: null }),
+  loadProject: (project, isDirty = false) =>
+    set({ project: withId(sanitizeGeeProject(project)), isDirty, selectedLayerId: null }),
 
   setProjectName: (name) =>
     set((state) => {
@@ -85,7 +107,7 @@ export const projectStore = createStore<ProjectState>((set) => ({
     set((state) => ({
       project: {
         ...state.project,
-        layers: normalizeGroupContiguity([...state.project.layers, layer]),
+        layers: insertByGroupOrder(state.project.layers, [layer], state.project.layerGroups ?? []),
       },
       selectedLayerId: layer.id,
       isDirty: true,
@@ -97,7 +119,11 @@ export const projectStore = createStore<ProjectState>((set) => ({
       return {
         project: {
           ...state.project,
-          layers: normalizeGroupContiguity([...state.project.layers, ...layers]),
+          layers: insertByGroupOrder(
+            state.project.layers,
+            layers,
+            state.project.layerGroups ?? [],
+          ),
         },
         selectedLayerId: layers[layers.length - 1]?.id ?? state.selectedLayerId,
         isDirty: true,

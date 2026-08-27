@@ -20,8 +20,14 @@
       <button id="open-project" class="icon-btn" data-tip="打开" aria-label="打开">
         <img src="icons/open.svg" alt="" />
       </button>
-      <button id="save-project" class="icon-btn" data-tip="保存" aria-label="保存">
+      <button id="save-project" class="icon-btn" data-tip="保存到 Remote" aria-label="保存到 Remote">
         <img src="icons/save.svg" alt="" />
+      </button>
+      <button id="import-project" class="icon-btn" data-tip="从本地导入" aria-label="从本地导入">
+        <img src="icons/import.svg" alt="" />
+      </button>
+      <button id="export-project" class="icon-btn" data-tip="导出到本地" aria-label="导出到本地">
+        <img src="icons/export.svg" alt="" />
       </button>
       <span class="separator"></span>
       <button id="add-vector" class="icon-btn" data-tip="矢量图层" aria-label="矢量图层">
@@ -59,6 +65,15 @@
       </div>
     </main>
     <footer id="status">Ready</footer>
+    <dialog id="project-browser" class="project-dialog">
+      <h2>Remote Projects</h2>
+      <select id="remote-projects" size="10" aria-label="Remote Projects"></select>
+      <div class="dialog-actions">
+        <button id="delete-project" type="button" class="danger">删除</button>
+        <form method="dialog"><button>取消</button></form>
+        <button id="open-selected-project" type="button">打开</button>
+      </div>
+    </dialog>
     <input id="project-file" type="file" accept=".json,.geolibre" hidden />
     <input id="vector-file" type="file" accept=".json,.geojson,.zip" hidden />
     <input id="raster-file" type="file" accept=".tif,.tiff" hidden />

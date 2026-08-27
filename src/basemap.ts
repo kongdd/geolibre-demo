@@ -88,16 +88,23 @@ export function bindBasemaps(
   });
   map.addControl(control, "top-left");
   thumbs = installBasemapThumbnails(control);
-  Map.addBasemap = async (ids) => {
-    for (const id of Array.isArray(ids) ? ids : [ids]) {
+  Map.addBasemap = async (ids, group) => {
+    const requested = typeof ids === "string" ? [ids] : ids;
+    for (const id of requested) {
       if (!control.isBasemapActive(id)) await control.addBasemap(id);
     }
+    if (!group) return;
+    const store = projectStore.getState();
+    const layerIds = store.project.layers
+      .filter((layer) => requested.includes(String(layer.metadata.basemapId)))
+      .map((layer) => layer.id);
+    if (layerIds.length) store.moveLayerToGroup(group, layerIds);
   };
   return control;
 }
 
 declare global {
   interface MapConstructor {
-    addBasemap(ids: string | readonly string[]): Promise<void>;
+    addBasemap(ids: string | readonly string[], group?: string): Promise<void>;
   }
 }

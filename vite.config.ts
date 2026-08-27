@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { eeAuthPlugin } from "./plugins/earthengine/plugin.ts";
+import { projectApiPlugin } from "./plugins/projects/plugin.ts";
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   base: "/project-demo/",
-  plugins: [eeAuthPlugin()],
+  plugins: [eeAuthPlugin(), projectApiPlugin()],
   // Earth Engine 通过形参名解析位置参数；禁止压缩器改名。
   esbuild: { minifyIdentifiers: false },
   build: { minify: "esbuild" },

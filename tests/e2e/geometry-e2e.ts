@@ -69,7 +69,7 @@ await tap(480, 380);
 await page.keyboard.press("Enter");
 await page.screenshot({ path: `${OUT}/line.png` });
 const afterLine = await dump();
-const lineLayer = afterLine.layers.at(-1);
+const lineLayer = afterLine.layers.find((layer) => layer.types.includes("LineString"));
 assert.deepEqual(lineLayer?.types, ["LineString"], `line should commit LineString, got ${JSON.stringify(afterLine)}`);
 assert.ok(afterLine.top?.includes("gee-geom-line"), `line layer must be on top, got ${afterLine.top}`);
 
@@ -97,8 +97,8 @@ await page.mouse.move(box.x + 460, box.y + 320, { steps: 8 });
 await page.mouse.up();
 await page.screenshot({ path: `${OUT}/rectangle.png` });
 const afterRect = await dump();
-const rectLayer = afterRect.layers.at(-1);
-assert.deepEqual(rectLayer?.types, ["Polygon"], `rectangle should commit Polygon, got ${JSON.stringify(afterRect)}`);
+const polygonLayers = afterRect.layers.filter((layer) => layer.types.includes("Polygon"));
+assert.equal(polygonLayers.length, 2, `rectangle should commit Polygon, got ${JSON.stringify(afterRect)}`);
 
 await page.screenshot({ path: `${OUT}/point-line-poly.png` });
 assert.equal(errors.length, 0, errors.join("\n"));

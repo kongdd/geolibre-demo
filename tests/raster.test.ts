@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pickRasterState, transparentMinimum } from "../src/raster";
+import { fillLayerId } from "@geolibre/map/headless";
+import { pickRasterState, rasterBeforeId, transparentMinimum } from "../src/raster";
 
 test("pickRasterState keeps GeoLibre style fields", () => {
   const state = pickRasterState({
@@ -24,6 +25,14 @@ test("pickRasterState keeps GeoLibre style fields", () => {
     gamma: 1.4,
     nodata: "auto",
   });
+});
+
+test("rasterBeforeId places rasters below the next rendered vector", () => {
+  const layers = [
+    { id: "flow", type: "cog", metadata: {} },
+    { id: "city", type: "geojson", metadata: {} },
+  ] as never;
+  assert.equal(rasterBeforeId(layers, "flow", (id) => id === fillLayerId("city")), fillLayerId("city"));
 });
 
 test("transparentMinimum follows the style checkbox", () => {

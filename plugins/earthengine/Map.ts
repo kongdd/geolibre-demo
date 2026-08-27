@@ -378,15 +378,15 @@ function paintOfficialVector(obj: ee.Computed, opts: AddOpts, existing: GeoLibre
   return layer;
 }
 
-/** GEE `Map.addLayer`：按 ee 类型分流；同步返回图层。 */
-export function addLayer(
+function addLayerToGroup(
+  group: string | undefined,
   obj: AddSrc,
   vis?: VisParams | null,
   name?: string,
   shown?: boolean,
   opacity?: number,
 ): GeoLibreLayer {
-  const opts = visToOpts(vis, name, shown, opacity);
+  const opts = { ...visToOpts(vis, name, shown, opacity), ...(group ? { group } : {}) };
   const existing = projectStore.getState().project.layers;
   if (isOfficialEe(obj) && typeof obj.serialize === "function") {
     const kind = typeof obj.name === "function" ? obj.name() : "";
@@ -430,6 +430,17 @@ export function addLayer(
   return paintVector(asCollection(obj), opts, existing);
 }
 
+/** GEE `Map.addLayer`：添加不属于 Group 的图层。 */
+export function addLayer(
+  obj: AddSrc,
+  vis?: VisParams | null,
+  name?: string,
+  shown?: boolean,
+  opacity?: number,
+): GeoLibreLayer {
+  return addLayerToGroup(undefined, obj, vis, name, shown, opacity);
+}
+
 function commitGeometry(feature: Feature | null, opts: AddOpts): GeoLibreLayer {
   if (!feature) throw new Error("坐标不足");
   const { project, addLayer } = projectStore.getState();
@@ -463,12 +474,29 @@ export function centerObject(layer: GeoLibreLayer, zoomLevel: number): void {
   });
 }
 
+export interface LayerGroupHandle {
+  readonly id: string;
+  addLayer: typeof addLayer;
+  addBasemap(ids: string | readonly string[]): Promise<void>;
+}
+
+export function addGroup(name: string): LayerGroupHandle {
+  const id = projectStore.getState().addGroup(name);
+  return {
+    id,
+    addLayer: (obj, vis, layerName, shown, opacity) =>
+      addLayerToGroup(id, obj, vis, layerName, shown, opacity),
+    addBasemap: (ids) => globalThis.Map.addBasemap(ids, id),
+  };
+}
+
 /** GEE `Map` API；挂在原生构造器上，不覆盖 `new Map()`。 */
-export const Map = { addLayer, centerObject };
+export const Map = { addGroup, addLayer, centerObject };
 Object.assign(globalThis.Map, Map);
 
 declare global {
   interface MapConstructor {
+    addGroup: typeof addGroup;
     addLayer: typeof addLayer;
     centerObject: typeof centerObject;
   }

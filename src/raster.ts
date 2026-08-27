@@ -4,6 +4,7 @@ import {
   type GeoLibreLayer,
   type LayerGroup,
 } from "@geolibre/core";
+import { circleLayerId, fillLayerId, lineLayerId } from "@geolibre/map/headless";
 import type * as maplibregl from "maplibre-gl";
 import { RasterControl, type RasterLayerState } from "maplibre-gl-raster";
 import { getRasterAsset, putRasterAsset } from "./assets";
@@ -112,6 +113,26 @@ export function rasterAssetId(layer: GeoLibreLayer): string | null {
   return typeof layer.source.assetId === "string" ? layer.source.assetId : null;
 }
 
+function nativeLayerIds(layer: GeoLibreLayer): string[] {
+  const external = layer.metadata.nativeLayerIds;
+  if (Array.isArray(external)) return external.filter((id): id is string => typeof id === "string");
+  if (layer.type !== "geojson") return [];
+  return [fillLayerId(layer.id), lineLayerId(layer.id), circleLayerId(layer.id)];
+}
+
+export function rasterBeforeId(
+  layers: GeoLibreLayer[],
+  rasterId: string,
+  exists: (id: string) => boolean,
+): string | null {
+  const index = layers.findIndex((layer) => layer.id === rasterId);
+  for (const layer of layers.slice(index + 1)) {
+    const id = nativeLayerIds(layer).find(exists);
+    if (id) return id;
+  }
+  return null;
+}
+
 export function createRemoteRasterLayer(url: string): GeoLibreLayer {
   return {
     id: crypto.randomUUID(),
@@ -179,6 +200,7 @@ export function createRasterAdapter(
   const thresholds = new Map<string, number>();
   installMinimumMask(control, thresholds);
   let desired = new Map<string, GeoLibreLayer>();
+  let anchors = new Map<string, string | null>();
   let disposed = false;
 
   const applyState = (layer: GeoLibreLayer) => {
@@ -188,6 +210,7 @@ export function createRasterAdapter(
       opacity: layer.opacity,
       visible: layer.visible,
     });
+    control.setRasterBeforeId(layer.id, anchors.get(layer.id) ?? null);
   };
 
   const ensure = async (layer: GeoLibreLayer, zoomTo: boolean) => {
@@ -204,6 +227,7 @@ export function createRasterAdapter(
         id: layer.id,
         name: layer.name,
         zoomTo: zoomTo && layer.metadata.zoomTo === true,
+        beforeId: anchors.get(layer.id) ?? undefined,
         state: {
           ...rasterMetadata(layer),
           opacity: layer.opacity,
@@ -229,8 +253,15 @@ export function createRasterAdapter(
   return {
     sync(layers, groups, opts) {
       const zoomTo = opts?.zoomTo !== false;
-      const rasters = applyGroupEffects(layers, groups).filter(isProjectRaster);
+      const ordered = applyGroupEffects(layers, groups);
+      const rasters = ordered.filter(isProjectRaster);
       desired = new Map(rasters.map((layer) => [layer.id, layer]));
+      anchors = new Map(
+        rasters.map((layer) => [
+          layer.id,
+          rasterBeforeId(ordered, layer.id, (id) => Boolean(map.getLayer(id))),
+        ]),
+      );
       thresholds.clear();
       for (const layer of rasters) {
         const min = transparentMinimum(layer.metadata.rasterState);

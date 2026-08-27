@@ -13,9 +13,10 @@ npm install
 npm run dev
 ```
 
-- 支持 GeoJSON、zipped Shapefile、XYZ、远程 COG、本地 GeoTIFF、图层样式、Group、地图视图及 Project JSON 读写。
-- 本地 GeoTIFF 保存到浏览器 IndexedDB；
-- Project 文件在其他浏览器打开时需要重新提供对应资产。
+- Project 默认保存为 `public/projects/<ProjectName>.geolibre.json`；旧 UUID 文件在下次保存时自动迁移，同名新 Project 须先改名。
+- Project 仅保存配置与数据路径；本地数据独立写入 `public/projects/<project-key>/data/`。
+- 支持远程打开、保存、删除；导入、导出使用本地 Project JSON。
+- 本地 GeoTIFF 在首次 Remote 保存前暂存于浏览器 IndexedDB。
 
 控制台：
 

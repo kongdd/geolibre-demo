@@ -83,6 +83,29 @@ test("addLayers writes once", () => {
   );
 });
 
+test("declared group order controls layer insertion", () => {
+  projectStore.getState().newProject("Order");
+  const top = projectStore.getState().addGroup("Top");
+  const bottom = projectStore.getState().addGroup("Bottom");
+  const layer = (id: string, groupId: string): GeoLibreLayer => ({
+    id,
+    name: id,
+    type: "geojson",
+    source: { type: "geojson" },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: {},
+    groupId,
+  });
+  projectStore.getState().addLayer(layer("top", top));
+  projectStore.getState().addLayer(layer("bottom", bottom));
+  assert.deepEqual(
+    projectStore.getState().project.layers.map((item) => item.id),
+    ["bottom", "top"],
+  );
+});
+
 test("moveLayerToGroup accepts one or many layer ids", () => {
   projectStore.getState().newProject("Groups");
   const groupId = projectStore.getState().addGroup("Demo");

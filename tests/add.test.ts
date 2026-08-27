@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  addGroup,
   addLayer,
   addMarker,
   asCollection,
@@ -185,11 +186,13 @@ test("ee types dispatch vector vs raster", () => {
 });
 
 test("Map.addLayer is sync like GEE", () => {
+  assert.equal(globalThis.Map.addGroup, addGroup);
   assert.equal(globalThis.Map.addLayer, addLayer);
   assert.equal(globalThis.Map.centerObject, centerObject);
   assert.equal(new globalThis.Map([[1, 2]]).get(1), 2);
   projectStore.getState().newProject("Map");
-  const layer = Map.addLayer(
+  const group = Map.addGroup("Vectors");
+  const layer = group.addLayer(
     { type: "FeatureCollection", features: [] },
     { color: "c62828", width: 2 },
     "Rivers",
@@ -200,6 +203,7 @@ test("Map.addLayer is sync like GEE", () => {
   assert.equal(layer.name, "Rivers");
   assert.equal(layer.visible, false);
   assert.equal(layer.opacity, 0.4);
+  assert.equal(layer.groupId, group.id);
   assert.equal(layer.style.strokeColor, "#c62828");
   assert.equal(layer.style.strokeWidth, 2);
 });

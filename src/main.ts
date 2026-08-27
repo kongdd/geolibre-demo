@@ -28,7 +28,15 @@ import {
   placeContextMenu,
   renderLayers,
 } from "./layer-tree";
-import { downloadProject, readProjectFile } from "./project-io";
+import {
+  deleteRemoteProject,
+  downloadProject,
+  listRemoteProjects,
+  readProjectFile,
+  readRemoteProject,
+  saveRemoteProject,
+} from "./project-io";
+import { createProjectFileKey, hasLegacyUuid, PROJECT_SUFFIX } from "./project-filename";
 import { createProjectRenderer } from "./project-renderer";
 import { projectStore } from "./project-store";
 import { createRasterAdapter, isProjectRaster, rasterAssetId } from "./raster";
@@ -50,6 +58,40 @@ const rasterFile = element<HTMLInputElement>("raster-file");
 const layersPanel = element<HTMLDivElement>("layers");
 const layersCollapse = element<HTMLButtonElement>("layers-collapse");
 const styleEditor = element<HTMLElement>("style-editor");
+const projectBrowser = element<HTMLDialogElement>("project-browser");
+const remoteProjects = element<HTMLSelectElement>("remote-projects");
+const openSelectedProject = element<HTMLButtonElement>("open-selected-project");
+const deleteProject = element<HTMLButtonElement>("delete-project");
+const saveProject = element<HTMLButtonElement>("save-project");
+const LAST_REMOTE_PROJECT = "geolibre:last-remote-project";
+let remoteProjectKey: string | null = null;
+
+function lastRemoteProject(): string | null {
+  try {
+    return localStorage.getItem(LAST_REMOTE_PROJECT);
+  } catch {
+    return null;
+  }
+}
+
+function rememberRemoteProject(key: string): void {
+  remoteProjectKey = key;
+  try {
+    localStorage.setItem(LAST_REMOTE_PROJECT, key);
+  } catch {
+    // 无本地存储时仍可正常使用 Remote Project。
+  }
+}
+
+function forgetRemoteProject(key: string): void {
+  try {
+    if (localStorage.getItem(LAST_REMOTE_PROJECT) === key) {
+      localStorage.removeItem(LAST_REMOTE_PROJECT);
+    }
+  } catch {
+    // 无本地存储时无需清理。
+  }
+}
 
 // MapLibre 6 把 transform 挪到 _camera；deck.gl 仍读 map.transform.height。
 if (!("transform" in maplibregl.Map.prototype)) {
@@ -116,7 +158,9 @@ function removeLayer(layer: GeoLibreLayer): void {
 const watershed = bindWatershedPlugin(map, fitLayer, () => {
   closeIdentify();
   closeGeometryEditor();
+  if (!basemaps.getState().collapsed) basemaps.collapse();
 });
+basemaps.on("expand", () => watershed.close());
 const layerActions = { fitLayer, removeLayer };
 bindStyleEditor(styleEditor, layerActions);
 bindLegend(element<HTMLElement>("legend"));
@@ -157,16 +201,100 @@ document.addEventListener("keydown", (event) => {
 });
 
 projectName.addEventListener("change", () => projectStore.getState().setProjectName(projectName.value));
+
 element("new-project").addEventListener("click", () => {
-  if (projectStore.getState().isDirty && !confirm("Discard unsaved changes?")) return;
+  if (projectStore.getState().isDirty && !confirm("放弃未保存的修改？")) return;
+  remoteProjectKey = null;
   projectStore.getState().newProject("Untitled Project");
-  setStatus("New project");
+  setStatus("已新建 Project");
 });
-element("open-project").addEventListener("click", () => projectFile.click());
-element("save-project").addEventListener("click", () => {
-  downloadProject(projectStore.getState().project);
-  projectStore.getState().markSaved();
-  setStatus("Project saved");
+
+element("import-project").addEventListener("click", () => projectFile.click());
+element("export-project").addEventListener("click", async () => {
+  try {
+    await downloadProject(projectStore.getState().project, remoteProjectKey);
+    setStatus("Project 已导出到本地");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+});
+
+async function refreshRemoteProjects(): Promise<void> {
+  const projects = await listRemoteProjects();
+  remoteProjects.replaceChildren(
+    ...projects.map((project) => {
+      const option = document.createElement("option");
+      option.value = project.key;
+      option.textContent = `${project.key}${PROJECT_SUFFIX} — ${new Date(project.updatedAt).toLocaleString()}`;
+      option.title = project.name;
+      return option;
+    }),
+  );
+  remoteProjects.disabled = !projects.length;
+  openSelectedProject.disabled = !projects.length;
+  deleteProject.disabled = !projects.length;
+}
+
+async function browseRemoteProjects(): Promise<void> {
+  try {
+    await refreshRemoteProjects();
+    projectBrowser.showModal();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+}
+
+element("open-project").addEventListener("click", () => void browseRemoteProjects());
+openSelectedProject.addEventListener("click", async () => {
+  const key = remoteProjects.value;
+  if (!key || (projectStore.getState().isDirty && !confirm("放弃未保存的修改？"))) return;
+  try {
+    projectStore.getState().loadProject(await readRemoteProject(key));
+    rememberRemoteProject(key);
+    projectBrowser.close();
+    setStatus("已打开 Remote Project");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+});
+
+deleteProject.addEventListener("click", async () => {
+  const key = remoteProjects.value;
+  const name = remoteProjects.selectedOptions[0]?.textContent ?? key;
+  if (!key || !confirm(`删除 Remote Project“${name}”？`)) return;
+  try {
+    await deleteRemoteProject(key);
+    if (remoteProjectKey === key) remoteProjectKey = null;
+    forgetRemoteProject(key);
+    await refreshRemoteProjects();
+    setStatus("Remote Project 已删除");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+});
+
+saveProject.addEventListener("click", async () => {
+  if (saveProject.disabled) return;
+  saveProject.disabled = true;
+  const project = projectStore.getState().project;
+  const previousKey = remoteProjectKey;
+  const key = !previousKey || hasLegacyUuid(previousKey)
+    ? createProjectFileKey(project.name)
+    : previousKey;
+  try {
+    if (key !== previousKey && (await listRemoteProjects()).some((item) => item.key === key)) {
+      throw new Error("同名 Remote Project 已存在，请修改 Project name");
+    }
+    await saveRemoteProject(key, project);
+    rememberRemoteProject(key);
+    if (previousKey && previousKey !== key) await deleteRemoteProject(previousKey);
+    projectStore.getState().markSaved();
+    setStatus("Project 已保存到 Remote");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    saveProject.disabled = false;
+  }
 });
 async function addGee(kind: "Image" | "ImageCollection" | "Feature" | "FeatureCollection"): Promise<void> {
   const id = prompt(`GEE ${kind} ID`)?.trim();
@@ -242,29 +370,43 @@ function whenMapLoad(): Promise<void> {
   return new Promise((resolve) => map.once("load", () => resolve()));
 }
 
-if (!projectStore.getState().project.layers.length) {
-  setStatus("正在加载示例图层…");
-  void whenMapLoad()
-    .then(loadDemoLayers)
-    .then((status) => {
+async function loadInitialProject(): Promise<void> {
+  const key = lastRemoteProject();
+  if (key) {
+    setStatus("正在打开上次的 Remote Project…");
+    try {
+      projectStore.getState().loadProject(await readRemoteProject(key));
+      rememberRemoteProject(key);
       layersPanel.classList.remove("booting");
-      setStatus(status);
-    })
-    .catch((error: unknown) => {
-      layersPanel.classList.remove("booting");
+      setStatus("已恢复上次的 Remote Project");
+      return;
+    } catch {
+      // Remote 不可用时退回示例 Project，下次启动继续尝试。
+    }
+  }
+
+  if (!projectStore.getState().project.layers.length) {
+    setStatus("正在加载示例图层…");
+    try {
+      setStatus(await whenMapLoad().then(loadDemoLayers));
+    } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error), true);
-    });
-} else {
+    }
+  }
   layersPanel.classList.remove("booting");
 }
+
+void loadInitialProject();
 
 projectFile.addEventListener("change", async () => {
   const [file] = projectFile.files ?? [];
   projectFile.value = "";
   if (!file) return;
+  if (projectStore.getState().isDirty && !confirm("放弃未保存的修改？")) return;
   try {
-    projectStore.getState().loadProject(await readProjectFile(file));
-    setStatus(`Loaded ${file.name}`);
+    projectStore.getState().loadProject(await readProjectFile(file), true);
+    remoteProjectKey = null;
+    setStatus(`已从本地导入 ${file.name}`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true);
   }

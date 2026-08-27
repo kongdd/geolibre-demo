@@ -1,8 +1,4 @@
-import {
-  createWatershedExtractor,
-  listWatershedRasters,
-  type Outlet,
-} from "@spatialhydro/watershed";
+import { createWatershedExtractor, type Outlet } from "@spatialhydro/watershed";
 import type { GeoLibreLayer } from "@geolibre/core";
 import type { FeatureCollection } from "geojson";
 import { Marker, type Map as MapLibreMap, type MapMouseEvent } from "maplibre-gl";
@@ -12,11 +8,39 @@ import { createVectorLayer } from "../../src/vector";
 
 export interface WatershedPlugin {
   cancel(): boolean;
+  close(): void;
   dispose(): void;
 }
 
 export function formatElapsed(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+
+export interface WatershedRasterOption {
+  id: string;
+  name: string;
+  value: string;
+}
+
+export function watershedRasterOptions(layers: GeoLibreLayer[]): WatershedRasterOption[] {
+  return layers.flatMap((layer) => {
+    if (layer.type !== "cog") return [];
+    const raw =
+      typeof layer.source.url === "string"
+        ? layer.source.url
+        : typeof layer.metadata.localFileName === "string"
+          ? layer.metadata.localFileName
+          : "";
+    if (!raw) return [];
+    const file = raw.split("?")[0]!.split("/").pop() || "";
+    let value = file;
+    try {
+      value = decodeURIComponent(file);
+    } catch {
+      /* keep malformed user-supplied filename verbatim */
+    }
+    return value ? [{ id: layer.id, name: layer.name, value }] : [];
+  });
 }
 
 export interface NamedOutlet extends Outlet {
@@ -80,17 +104,6 @@ export function outletsToGeoJSON(outlets: NamedOutlet[]): FeatureCollection {
       properties: { id, name },
     })),
   };
-}
-
-function downloadGeoJSON(name: string, collection: FeatureCollection): void {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(collection, null, 2)], { type: "application/geo+json" }),
-  );
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${name.replace(/[^\p{L}\p{N}._-]+/gu, "_") || "pour_points"}_出水口.geojson`;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function featureId(feature: FeatureCollection["features"][number]): number {
@@ -170,7 +183,7 @@ export function bindWatershedPlugin(
   const distanceRow = panel.querySelector<HTMLElement>("[data-distance-row]")!;
 
   let armed = false;
-  let loaded = false;
+  let rasterLayers: GeoLibreLayer[] | undefined;
   let request: AbortController | null = null;
   let previousCursor = "";
   let previewMarker: Marker | null = null;
@@ -180,22 +193,32 @@ export function bindWatershedPlugin(
     NamedOutlet & { key: string; selected: boolean; extracted: boolean; areaKm2?: number }
   > = [];
 
-  function setOptions(select: HTMLSelectElement, values: string[]): void {
-    select.replaceChildren(...values.map((value) => new Option(value, value)));
-    select.disabled = values.length === 0;
+  function setOptions(
+    select: HTMLSelectElement,
+    options: WatershedRasterOption[],
+    preferred: RegExp,
+  ): void {
+    const previous = select.value;
+    select.replaceChildren(...options.map(({ id, name }) => new Option(name, id)));
+    select.value = options.some(({ id }) => id === previous)
+      ? previous
+      : (options.find(({ name }) => preferred.test(name)) ?? options[0])?.id ?? "";
+    select.disabled = options.length === 0;
   }
 
-  async function loadRasters(): Promise<void> {
-    if (loaded) return;
-    try {
-      const rasters = await listWatershedRasters({ baseUrl });
-      setOptions(flowdir, rasters.flowdirs);
-      setOptions(flowaccu, rasters.flowaccus);
-      loaded = true;
-      if (!rasters.flowdirs.length) setStatus("数据目录中没有 FlowDir GeoTIFF", true);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error), true);
-    }
+  function refreshRasters(): void {
+    const layers = projectStore.getState().project.layers;
+    if (layers === rasterLayers) return;
+    rasterLayers = layers;
+    const options = watershedRasterOptions(layers);
+    setOptions(flowdir, options, /流向|flow.?dir/i);
+    setOptions(flowaccu, options, /累积流|flow.?acc/i);
+  }
+
+  function selectedRaster(select: HTMLSelectElement): string {
+    return watershedRasterOptions(projectStore.getState().project.layers).find(
+      ({ id }) => id === select.value,
+    )?.value ?? "";
   }
 
   function renameAsset(key: string, name: string): void {
@@ -203,7 +226,7 @@ export function bindWatershedPlugin(
     const layer = state.project.layers.find((item) => item.metadata.pourPointKey === key);
     if (!layer?.geojson) return;
     state.updateLayer(layer.id, {
-      name,
+      name: `Pour_${name}`,
       geojson: {
         ...layer.geojson,
         features: layer.geojson.features.map((feature) => ({
@@ -333,12 +356,12 @@ export function bindWatershedPlugin(
     button.classList.add("active");
     button.ariaPressed = "true";
     syncDraftMarkers();
-    void loadRasters();
+    refreshRasters();
   }
 
   function previewAtMouse(event: MapMouseEvent): void {
-    previewMarker ??= pointMarker("watershed-map-point preview").addTo(map);
-    previewMarker.setLngLat(event.lngLat);
+    if (previewMarker) previewMarker.setLngLat(event.lngLat);
+    else previewMarker = pointMarker("watershed-map-point preview").setLngLat(event.lngLat).addTo(map);
   }
 
   function pickAtClick(event: MapMouseEvent): void {
@@ -386,12 +409,14 @@ export function bindWatershedPlugin(
       if (existingLayers.length && !reextract.checked) {
         throw new Error(`“${name}”已存在；如需替换，请勾选“重新提取”`);
       }
-      if (!flowdir.value) throw new Error("请选择 FlowDir");
+      const flowdirValue = selectedRaster(flowdir);
+      const flowaccuValue = selectedRaster(flowaccu);
+      if (!flowdirValue) throw new Error("请选择 FlowDir 图层");
       const snapDistanceM = snap.checked ? Number(distance.value) : 0;
       if (!Number.isFinite(snapDistanceM) || snapDistanceM < 0) {
         throw new Error("捕捉距离必须是非负数");
       }
-      if (snap.checked && !flowaccu.value) throw new Error("启用捕捉时必须选择 FlowAccum");
+      if (snap.checked && !flowaccuValue) throw new Error("启用捕捉时必须选择 FlowAccum 图层");
 
       request?.abort();
       const current = new AbortController();
@@ -400,8 +425,8 @@ export function bindWatershedPlugin(
       setStatus("正在提取流域…");
       const result = await createWatershedExtractor({
         baseUrl,
-        flowdir: flowdir.value,
-        flowaccu: snap.checked ? flowaccu.value : undefined,
+        flowdir: flowdirValue,
+        flowaccu: snap.checked ? flowaccuValue : undefined,
         snapDistanceM,
       }).extract(outlets, current.signal);
       const watershed = result.watershed as FeatureCollection | null;
@@ -415,38 +440,52 @@ export function bindWatershedPlugin(
       const pointNames = new Map(outlets.map((outlet) => [outlet.id, outlet.name]));
       const state = projectStore.getState();
       const layers: GeoLibreLayer[] = [];
+      const basinGroupId =
+        state.project.layerGroups?.find((group) => group.name === "Basins")?.id ??
+        state.addGroup("Basins");
+      const pourGroupId =
+        projectStore.getState().project.layerGroups?.find((group) => group.name === "Pours")?.id ??
+        projectStore.getState().addGroup("Pours");
       if (watershed?.features.length) {
-        const layer = createVectorLayer(name, nameFeatures(watershed, basinNames), state.project.layers);
+        const collection = nameFeatures(watershed, basinNames);
+        collection.features = collection.features.map((feature) => ({
+          ...feature,
+          properties: { ...(feature.properties ?? {}), watershedName: name },
+        }));
+        const layer = createVectorLayer(name, collection, state.project.layers);
+        layer.groupId = basinGroupId;
         layer.metadata = { watershedName: name, watershedRole: "basin" };
         layers.push(layer);
       }
       for (const [index, outlet] of outlets.entries()) {
-        const features = pointAssets.features.filter((feature) => featureId(feature) === outlet.id);
+        const key = selectedDrafts[index]!.key;
+        const features = pointAssets.features
+          .filter((feature) => featureId(feature) === outlet.id)
+          .map((feature) => ({
+            ...feature,
+            properties: { ...(feature.properties ?? {}), watershedName: name, pourPointKey: key },
+          }));
         const layer = createVectorLayer(
-          outlet.name,
+          `Pour_${outlet.name}`,
           nameFeatures({ ...pointAssets, features }, pointNames),
           [...state.project.layers, ...layers],
         );
+        layer.groupId = pourGroupId;
         layer.metadata = {
           watershedName: name,
           watershedRole: "pour-point",
-          pourPointKey: selectedDrafts[index]!.key,
+          pourPointKey: key,
           userAsset: true,
         };
         layers.push(layer);
       }
-      const groupId =
-        state.project.layerGroups?.find((group) => group.name === "流域提取结果")?.id ??
-        state.addGroup("流域提取结果");
       for (const layer of existingLayers) state.removeLayer(layer.id);
       state.addLayers(layers);
-      state.moveLayerToGroup(groupId, layers.map((layer) => layer.id));
       if (layers[0]) fitLayer(layers[0]);
-      downloadGeoJSON(name, pointAssets);
       const area = result.response.basin_stats.reduce((sum, basin) => sum + basin.area_km2, 0);
       const areaText = area > 0 ? `（${area.toFixed(1)} km²）` : "";
       setStatus(
-        `流域提取完成：${name}${areaText}；用时 ${formatElapsed(result.response.walls_ms)}；出水口 GeoJSON 已保存`,
+        `流域提取完成：${name}${areaText}；用时 ${formatElapsed(result.response.walls_ms)}`,
       );
       for (const [index, draft] of selectedDrafts.entries()) {
         draft.extracted = true;
@@ -468,6 +507,8 @@ export function bindWatershedPlugin(
   }
 
   renderPoints();
+  refreshRasters();
+  const unsubscribe = projectStore.subscribe(refreshRasters);
   addPoints.addEventListener("click", importPoints);
   snap.addEventListener("change", () => {
     flowaccuRow.hidden = !snap.checked;
@@ -495,10 +536,14 @@ export function bindWatershedPlugin(
       closePanel();
       return true;
     },
+    close() {
+      if (!panel.hidden) closePanel();
+    },
     dispose() {
       disarm();
       clearDraftMarkers();
       request?.abort();
+      unsubscribe();
       button.remove();
       panel.remove();
     },

@@ -1,0 +1,12 @@
+{
+  "tools": {
+    "disabled": [
+      "image_minimax",
+      "subagent",
+      "workflow"
+    ],
+    "enabled": [
+      "process"
+    ]
+  }
+}

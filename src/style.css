@@ -524,8 +524,7 @@ small {
 }
 
 .watershed-panel input:not([type="checkbox"], [type="color"]),
-.watershed-panel select,
-.watershed-panel textarea {
+.watershed-panel select {
   min-height: 2.15rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid #b8c0cc;
@@ -535,8 +534,7 @@ small {
 }
 
 .watershed-panel input:not([type="checkbox"], [type="color"]):focus,
-.watershed-panel select:focus,
-.watershed-panel textarea:focus {
+.watershed-panel select:focus {
   border-color: #3984cf;
   outline: 2px solid rgb(57 132 207 / 18%);
   outline-offset: 0;
@@ -545,12 +543,6 @@ small {
 .watershed-panel[hidden],
 .watershed-panel [hidden] {
   display: none;
-}
-
-.watershed-panel textarea {
-  box-sizing: border-box;
-  width: 100%;
-  resize: vertical;
 }
 
 .field.watershed-snap input {
@@ -584,10 +576,6 @@ small {
 .watershed-points > span {
   display: flex;
   justify-content: space-between;
-}
-
-.watershed-points > button {
-  justify-self: end;
 }
 
 .watershed-point-list {

@@ -37,7 +37,13 @@ try {
   assert.equal(initial.expanded, "true");
 
   await page.click("#toggle-sidebar");
-  await page.waitForFunction(() => document.querySelector<HTMLElement>("#sidebar")?.hidden);
+  await page.waitForFunction(() => {
+    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const stage = document.querySelector<HTMLElement>(".map-stage");
+    const canvas = document.querySelector<HTMLCanvasElement>("#map .maplibregl-canvas");
+    if (!sidebar?.hidden || !stage || !canvas) return false;
+    return Math.abs(canvas.getBoundingClientRect().width - stage.getBoundingClientRect().width) < 1;
+  });
   const closed = await layout();
   assert.equal(closed.shellCollapsed, true);
   assert.equal(closed.expanded, "false");
@@ -46,7 +52,13 @@ try {
   assert.ok(Math.abs(closed.canvas.width - closed.stage.width) < 1);
 
   await page.click("#toggle-sidebar");
-  await page.waitForFunction(() => !document.querySelector<HTMLElement>("#sidebar")?.hidden);
+  await page.waitForFunction(() => {
+    const sidebar = document.querySelector<HTMLElement>("#sidebar");
+    const stage = document.querySelector<HTMLElement>(".map-stage");
+    const canvas = document.querySelector<HTMLCanvasElement>("#map .maplibregl-canvas");
+    if (sidebar?.hidden !== false || !stage || !canvas) return false;
+    return Math.abs(canvas.getBoundingClientRect().width - stage.getBoundingClientRect().width) < 1;
+  });
   const reopened = await layout();
   assert.equal(reopened.shellCollapsed, false);
   assert.equal(reopened.expanded, "true");

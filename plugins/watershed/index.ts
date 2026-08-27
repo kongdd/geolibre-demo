@@ -48,53 +48,6 @@ export interface NamedOutlet extends Outlet {
   name: string;
 }
 
-export function parsePourPoints(text: string): NamedOutlet[] {
-  const points = text
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const fields = line.includes(",")
-        ? line.split(",").map((value) => value.trim())
-        : line.split(/\s+/);
-      const numeric = fields.map(Number);
-      let [id, name, lon, lat]: [number, string, number, number] = [
-        index + 1,
-        `出水口 ${index + 1}`,
-        Number.NaN,
-        Number.NaN,
-      ];
-      if (fields.length === 2) [lon, lat] = numeric;
-      else if (fields.length === 3 && numeric.every(Number.isFinite)) {
-        [id, lon, lat] = numeric;
-        name = `出水口 ${id}`;
-      } else if (fields.length === 3) [name, lon, lat] = [fields[0]!, numeric[1]!, numeric[2]!];
-      else if (fields.length === 4) [id, name, lon, lat] = [numeric[0]!, fields[1]!, numeric[2]!, numeric[3]!];
-      if (
-        !Number.isSafeInteger(id) ||
-        id <= 0 ||
-        !name ||
-        !Number.isFinite(lon) ||
-        lon < -180 ||
-        lon > 180 ||
-        !Number.isFinite(lat) ||
-        lat < -90 ||
-        lat > 90
-      ) {
-        throw new Error(`出水口第 ${index + 1} 行格式应为 名称,经度,纬度`);
-      }
-      return { id, name, lon, lat };
-    });
-  if (!points.length) throw new Error("请输入至少一个出水口");
-  if (new Set(points.map(({ id }) => id)).size !== points.length) {
-    throw new Error("出水口 ID 不能重复");
-  }
-  if (new Set(points.map(({ name }) => name)).size !== points.length) {
-    throw new Error("出水口名称不能重复");
-  }
-  return points;
-}
-
 export function outletsToGeoJSON(outlets: NamedOutlet[]): FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -104,6 +57,39 @@ export function outletsToGeoJSON(outlets: NamedOutlet[]): FeatureCollection {
       properties: { id, name },
     })),
   };
+}
+
+export type WatershedDraft = NamedOutlet & {
+  key: string;
+  selected: boolean;
+  extracted: boolean;
+  areaKm2?: number;
+};
+
+export function draftsFromLayers(layers: GeoLibreLayer[]): WatershedDraft[] {
+  const drafts: WatershedDraft[] = [];
+  for (const layer of layers) {
+    if (layer.metadata.watershedRole !== "pour-point") continue;
+    const feature = layer.geojson?.features.find((item) => item.geometry?.type === "Point");
+    if (!feature || feature.geometry.type !== "Point") continue;
+    const [lon, lat] = feature.geometry.coordinates;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+    const rawId = Number(feature.properties?.id);
+    const name =
+      (typeof feature.properties?.name === "string" && feature.properties.name) ||
+      layer.name.replace(/^Pour_/, "") ||
+      `出水口 ${drafts.length + 1}`;
+    drafts.push({
+      id: Number.isSafeInteger(rawId) && rawId > 0 ? rawId : drafts.length + 1,
+      name,
+      lon,
+      lat,
+      key: typeof layer.metadata.pourPointKey === "string" ? layer.metadata.pourPointKey : layer.id,
+      selected: false,
+      extracted: true,
+    });
+  }
+  return drafts;
 }
 
 function featureId(feature: FeatureCollection["features"][number]): number {
@@ -162,8 +148,6 @@ export function bindWatershedPlugin(
     <div class="watershed-points">
       <span>出水口 <small>勾选本次提取的点</small></span>
       <div class="watershed-point-list" data-point-list></div>
-      <textarea data-points rows="2" placeholder="名称, 经度, 纬度；每行一个"></textarea>
-      <button type="button" data-add-points>添加坐标</button>
     </div>
     <div class="watershed-actions"><button type="button" data-run>开始提取</button></div>`;
   document.querySelector("aside")?.append(panel);
@@ -175,9 +159,7 @@ export function bindWatershedPlugin(
   const resultName = panel.querySelector<HTMLInputElement>("[data-name]")!;
   const reextract = panel.querySelector<HTMLInputElement>("[data-reextract]")!;
   const outletName = panel.querySelector<HTMLInputElement>("[data-outlet-name]")!;
-  const points = panel.querySelector<HTMLTextAreaElement>("[data-points]")!;
   const pointList = panel.querySelector<HTMLElement>("[data-point-list]")!;
-  const addPoints = panel.querySelector<HTMLButtonElement>("[data-add-points]")!;
   const run = panel.querySelector<HTMLButtonElement>("[data-run]")!;
   const flowaccuRow = panel.querySelector<HTMLElement>("[data-flowaccu-row]")!;
   const distanceRow = panel.querySelector<HTMLElement>("[data-distance-row]")!;
@@ -189,9 +171,9 @@ export function bindWatershedPlugin(
   let previewMarker: Marker | null = null;
   let extractionIndex = 1;
   const draftMarkers = new Map<string, Marker>();
-  const drafts: Array<
-    NamedOutlet & { key: string; selected: boolean; extracted: boolean; areaKm2?: number }
-  > = [];
+  const drafts: WatershedDraft[] = [];
+  let projectId = projectStore.getState().project.id;
+  let pourSignature = "";
 
   function setOptions(
     select: HTMLSelectElement,
@@ -309,6 +291,34 @@ export function bindWatershedPlugin(
     );
   }
 
+  function pourKeys(layers: GeoLibreLayer[]): string {
+    return layers
+      .filter((layer) => layer.metadata.watershedRole === "pour-point")
+      .map((layer) => `${layer.id}:${String(layer.metadata.pourPointKey ?? "")}`)
+      .join("|");
+  }
+
+  function syncDraftsFromProject(): void {
+    const project = projectStore.getState().project;
+    const next = `${project.id}\n${pourKeys(project.layers)}`;
+    if (next === pourSignature) return;
+    const sameProject = project.id === projectId;
+    const areas = new Map(
+      drafts.filter((draft) => draft.areaKm2 != null).map((draft) => [draft.key, draft.areaKm2]),
+    );
+    const unextracted = sameProject ? drafts.filter((draft) => !draft.extracted) : [];
+    pourSignature = next;
+    projectId = project.id;
+    const restored = draftsFromLayers(project.layers).map((draft) =>
+      areas.has(draft.key) ? { ...draft, areaKm2: areas.get(draft.key) } : draft,
+    );
+    const keys = new Set(restored.map((draft) => draft.key));
+    drafts.length = 0;
+    drafts.push(...restored, ...unextracted.filter((draft) => !keys.has(draft.key)));
+    outletName.value = `出水口 ${drafts.length + 1}`;
+    renderPoints();
+  }
+
   function appendPoints(outlets: NamedOutlet[]): void {
     const names = new Set(drafts.map(({ name }) => name));
     if (outlets.some(({ name }) => names.has(name))) throw new Error("出水口名称不能重复");
@@ -321,15 +331,6 @@ export function bindWatershedPlugin(
       })),
     );
     renderPoints();
-  }
-
-  function importPoints(): void {
-    try {
-      appendPoints(parsePourPoints(points.value));
-      points.value = "";
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error), true);
-    }
   }
 
   function disarm(): void {
@@ -506,10 +507,12 @@ export function bindWatershedPlugin(
     }
   }
 
-  renderPoints();
   refreshRasters();
-  const unsubscribe = projectStore.subscribe(refreshRasters);
-  addPoints.addEventListener("click", importPoints);
+  syncDraftsFromProject();
+  const unsubscribe = projectStore.subscribe(() => {
+    refreshRasters();
+    syncDraftsFromProject();
+  });
   snap.addEventListener("change", () => {
     flowaccuRow.hidden = !snap.checked;
     distanceRow.hidden = !snap.checked;

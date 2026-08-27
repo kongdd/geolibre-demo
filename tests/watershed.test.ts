@@ -2,24 +2,15 @@ import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "@geolibre/core";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  draftsFromLayers,
   formatElapsed,
   outletsToGeoJSON,
-  parsePourPoints,
   watershedRasterOptions,
 } from "../plugins/watershed";
 
 test("formatElapsed uses readable units", () => {
   assert.equal(formatElapsed(35), "35 ms");
   assert.equal(formatElapsed(1234), "1.23 s");
-});
-
-test("parsePourPoints names coordinates and accepts explicit names", () => {
-  assert.deepEqual(parsePourPoints("110.8, 32.6\n丹江口, 110.9, 32.7\n7, 十堰, 111, 33"), [
-    { id: 1, name: "出水口 1", lon: 110.8, lat: 32.6 },
-    { id: 2, name: "丹江口", lon: 110.9, lat: 32.7 },
-    { id: 7, name: "十堰", lon: 111, lat: 33 },
-  ]);
-  assert.throws(() => parsePourPoints("甲, 110, 32\n甲, 111, 33"), /名称不能重复/);
 });
 
 test("outletsToGeoJSON preserves named user assets", () => {
@@ -33,6 +24,40 @@ test("outletsToGeoJSON preserves named user assets", () => {
       },
     ],
   });
+});
+
+test("draftsFromLayers restores extracted pour points", () => {
+  const layer: GeoLibreLayer = {
+    id: "pour-1",
+    name: "Pour_丹江口",
+    type: "geojson",
+    source: { type: "geojson" },
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [111, 32] },
+          properties: { id: 3, name: "丹江口" },
+        },
+      ],
+    },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: { watershedRole: "pour-point", pourPointKey: "k1" },
+  };
+  assert.deepEqual(draftsFromLayers([layer]), [
+    {
+      id: 3,
+      name: "丹江口",
+      lon: 111,
+      lat: 32,
+      key: "k1",
+      selected: false,
+      extracted: true,
+    },
+  ]);
 });
 
 test("watershed raster selectors use current COG layers", () => {

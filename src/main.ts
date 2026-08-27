@@ -283,8 +283,13 @@ saveProject.addEventListener("click", async () => {
   const previousKey = remoteProjectKey;
   const key = createProjectFileKey(project.name);
   try {
-    if (key !== previousKey && (await listRemoteProjects()).some((item) => item.key === key)) {
-      throw new Error("同名 Remote Project 已存在，请修改 Project name");
+    if (
+      key !== previousKey &&
+      (await listRemoteProjects()).some((item) => item.key === key) &&
+      !confirm(`Remote Project“${project.name}”已存在，是否覆盖？`)
+    ) {
+      setStatus("已取消保存");
+      return;
     }
     await saveRemoteProject(key, project);
     rememberRemoteProject(key);

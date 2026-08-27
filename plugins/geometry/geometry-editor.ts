@@ -213,9 +213,6 @@ function geometriesGroupId(): string {
 function addGeometryToStore(layer: ReturnType<typeof createGeometryLayer>): void {
   layer.groupId = geometriesGroupId();
   projectStore.getState().addLayer(layer);
-  const layers = projectStore.getState().project.layers;
-  const first = layers.findIndex((item) => item.groupId === layer.groupId);
-  if (first >= 0 && layers[first]?.id !== layer.id) projectStore.getState().moveLayer(layer.id, first);
   layerId = layer.id;
 }
 

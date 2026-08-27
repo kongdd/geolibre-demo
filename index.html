@@ -13,6 +13,16 @@
   </head>
   <body>
     <header class="toolbar">
+      <button
+        id="toggle-sidebar"
+        class="icon-btn"
+        data-tip="关闭侧边栏"
+        aria-label="关闭侧边栏"
+        aria-controls="sidebar"
+        aria-expanded="true"
+      >
+        <img src="icons/sidebar.svg" alt="" />
+      </button>
       <input id="project-name" aria-label="Project 名称" />
       <button id="new-project" class="icon-btn" data-tip="新建" aria-label="新建">
         <img src="icons/new.svg" alt="" />
@@ -46,8 +56,8 @@
         <img src="icons/geometry.svg" alt="" />
       </button>
     </header>
-    <main>
-      <aside>
+    <main id="app-shell">
+      <aside id="sidebar">
         <section id="layers-section" class="layers-section">
           <div class="section-title">
             <button id="layers-collapse" title="折叠 Layers" aria-expanded="true">▾</button>

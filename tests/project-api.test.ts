@@ -1,6 +1,6 @@
 import { createEmptyProject, DEFAULT_LAYER_STYLE, serializeProject } from "@geolibre/core";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,22 +13,41 @@ import {
   writeStoredAsset,
   writeStoredProject,
 } from "../plugins/projects/plugin";
+import { PROJECT_SUFFIX } from "../src/project-filename";
 
 test("remote project storage keeps project and data in separate files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "geolibre-projects-"));
   const key = "丹江口-1234";
-  const content = serializeProject(createEmptyProject("丹江口"));
+  const project = createEmptyProject("丹江口");
+  project.layers.push({
+    id: "basin",
+    name: "流域",
+    type: "geojson",
+    source: { type: "geojson", url: `/api/projects/${key}/data/basin.geojson` },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: { projectAsset: "basin.geojson" },
+  });
+  const content = serializeProject(project);
   const asset = Buffer.from('{"type":"FeatureCollection","features":[]}');
   try {
     await writeStoredAsset(key, "basin.geojson", asset, directory);
+    await writeStoredAsset(key, "stale.geojson", asset, directory);
     await writeStoredProject(key, content, directory);
+    await symlink(
+      `${key}${PROJECT_SUFFIX}`,
+      join(directory, `864c6b4d-5550-4341-9d93-8137b6678bc0${PROJECT_SUFFIX}`),
+    );
     assert.deepEqual((await listStoredProjects(directory))[0], {
       key,
       name: "丹江口",
       updatedAt: (await listStoredProjects(directory))[0]!.updatedAt,
+      aliases: ["864c6b4d-5550-4341-9d93-8137b6678bc0"],
     });
     assert.equal(await readStoredProject(key, directory), content);
     assert.deepEqual(await readStoredAsset(key, "basin.geojson", directory), asset);
+    await assert.rejects(() => readStoredAsset(key, "stale.geojson", directory));
     await deleteStoredProject(key, directory);
     assert.deepEqual(await listStoredProjects(directory), []);
     await assert.rejects(() => readStoredAsset(key, "basin.geojson", directory));

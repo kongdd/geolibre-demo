@@ -1,14 +1,18 @@
 import {
   createEmptyProject,
   DEFAULT_LAYER_STYLE,
-  serializeProject,
+  parseProject,
   type GeoLibreLayer,
   type GeoLibreProject,
 } from "@geolibre/core";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createProjectFileKey, hasLegacyUuid } from "../src/project-filename";
-import { hydrateProjectData, prepareProjectForStorage } from "../src/project-io";
+import { createProjectFileKey } from "../src/project-filename";
+import {
+  hydrateProjectData,
+  prepareProjectForStorage,
+  serializeStoredProject,
+} from "../src/project-io";
 
 function project(): GeoLibreProject {
   const layer: GeoLibreLayer = {
@@ -53,8 +57,11 @@ test("project storage writes GeoJSON separately and keeps only its path", async 
     const stored = await prepareProjectForStorage("Watershed-1234", project());
     const layer = stored.layers[0]!;
     assert.equal(layer.geojson, undefined);
-    assert.match(String(layer.source.url), /Watershed-1234\/data\/basin\.geojson$/);
-    assert.equal(serializeProject(stored).includes('"coordinates"'), false);
+    assert.match(decodeURIComponent(String(layer.source.url)), /Watershed-1234\/data\/汉江流域\.geojson$/);
+    const content = serializeStoredProject(stored);
+    assert.equal(content.includes('"coordinates"'), false);
+    assert.equal(content.includes('"fillPattern"'), false);
+    assert.deepEqual(parseProject(content).layers[0]?.style, layer.style);
     assert.equal(files.size, 1);
 
     const hydrated = await hydrateProjectData(stored);
@@ -67,7 +74,4 @@ test("project storage writes GeoJSON separately and keeps only its path", async 
 
 test("project filenames use only the project name", () => {
   assert.equal(createProjectFileKey("丹江口 Project"), "丹江口_Project");
-  assert.equal(hasLegacyUuid("864c6b4d-5550-4341-9d93-8137b6678bc0"), true);
-  assert.equal(hasLegacyUuid("丹江口-864c6b4d-5550-4341-9d93-8137b6678bc0"), true);
-  assert.equal(hasLegacyUuid("丹江口"), false);
 });

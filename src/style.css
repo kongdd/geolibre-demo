@@ -125,6 +125,10 @@ main {
   grid-template-columns: 300px 1fr;
 }
 
+main.sidebar-hidden {
+  grid-template-columns: 1fr;
+}
+
 aside {
   position: relative;
   z-index: 1;
@@ -133,7 +137,11 @@ aside {
   flex-direction: column;
   border-right: 1px solid #d7dce3;
   background: white;
-  overflow: auto;
+  overflow: hidden;
+}
+
+#sidebar[hidden] {
+  display: none;
 }
 
 aside section {
@@ -143,7 +151,11 @@ aside section {
 
 .layers-section {
   min-height: 8rem;
+  flex: 1 1 auto;
   padding: 0.4rem 0.35rem 0.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 #layers {
@@ -318,7 +330,20 @@ small {
 
 #style-editor {
   display: grid;
+  flex: 0 1 auto;
   gap: 0.5rem;
+  max-height: 55%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+#style-editor > .section-title,
+#layers-section > .section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: white;
 }
 
 #style-editor[hidden] {

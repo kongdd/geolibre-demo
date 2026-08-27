@@ -5,6 +5,7 @@ import {
   open,
   readFile,
   readdir,
+  readlink,
   rename,
   rm,
   stat,
@@ -12,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseProject } from "@geolibre/core";
 import type { Plugin } from "vite";
@@ -28,6 +29,7 @@ export interface RemoteProjectSummary {
   key: string;
   name: string;
   updatedAt: string;
+  aliases?: string[];
 }
 
 export interface ProjectRoute {
@@ -75,7 +77,20 @@ function assetPath(directory: string, key: string, asset: string): string {
 
 export async function listStoredProjects(directory = PROJECT_DIR): Promise<RemoteProjectSummary[]> {
   await mkdir(directory, { recursive: true });
-  const files = (await readdir(directory)).filter((file) => file.endsWith(PROJECT_SUFFIX));
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(PROJECT_SUFFIX))
+    .map((entry) => entry.name);
+  const aliases = new Map<string, string[]>();
+  await Promise.all(
+    entries.filter((entry) => entry.isSymbolicLink()).map(async (entry) => {
+      const target = basename(await readlink(join(directory, entry.name)));
+      if (!target.endsWith(PROJECT_SUFFIX)) return;
+      const list = aliases.get(target) ?? [];
+      list.push(entry.name.slice(0, -PROJECT_SUFFIX.length));
+      aliases.set(target, list);
+    }),
+  );
   const projects = await Promise.all(
     files.map(async (file) => {
       try {
@@ -88,6 +103,7 @@ export async function listStoredProjects(directory = PROJECT_DIR): Promise<Remot
           key: file.slice(0, -PROJECT_SUFFIX.length),
           name: project.name,
           updatedAt: info.mtime.toISOString(),
+          ...(aliases.has(file) ? { aliases: aliases.get(file) } : {}),
         };
       } catch {
         return null;
@@ -101,6 +117,31 @@ export async function listStoredProjects(directory = PROJECT_DIR): Promise<Remot
 
 export async function readStoredProject(key: string, directory = PROJECT_DIR): Promise<string> {
   return readFile(projectPath(directory, key), "utf8");
+}
+
+async function pruneStoredAssets(
+  key: string,
+  project: ReturnType<typeof parseProject>,
+  directory: string,
+): Promise<void> {
+  const keep = new Set<string>();
+  for (const layer of project.layers) {
+    const asset = layer.metadata.projectAsset;
+    if (typeof asset === "string" && valid(asset, ASSET_NAME)) keep.add(asset);
+    const match = typeof layer.source.url === "string"
+      ? layer.source.url.match(/\/data\/([^/?#]+)$/)
+      : null;
+    if (match) {
+      const file = decodeURIComponent(match[1]!);
+      if (valid(file, ASSET_NAME)) keep.add(file);
+    }
+  }
+  const data = projectDataPath(directory, key);
+  const files = await readdir(data).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
+  await Promise.all(files.filter((file) => !keep.has(file)).map((file) => unlink(join(data, file))));
 }
 
 export async function writeStoredProject(
@@ -123,6 +164,7 @@ export async function writeStoredProject(
   await writeFile(temporary, content, { encoding: "utf8", flag: "wx" });
   try {
     await rename(temporary, path);
+    await pruneStoredAssets(key, project, directory);
   } catch (error) {
     await unlink(temporary).catch(() => undefined);
     throw error;

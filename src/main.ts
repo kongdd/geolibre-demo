@@ -36,7 +36,7 @@ import {
   readRemoteProject,
   saveRemoteProject,
 } from "./project-io";
-import { createProjectFileKey, hasLegacyUuid, PROJECT_SUFFIX } from "./project-filename";
+import { createProjectFileKey, PROJECT_SUFFIX } from "./project-filename";
 import { createProjectRenderer } from "./project-renderer";
 import { projectStore } from "./project-store";
 import { createRasterAdapter, isProjectRaster, rasterAssetId } from "./raster";
@@ -55,6 +55,9 @@ const projectName = element<HTMLInputElement>("project-name");
 const projectFile = element<HTMLInputElement>("project-file");
 const vectorFile = element<HTMLInputElement>("vector-file");
 const rasterFile = element<HTMLInputElement>("raster-file");
+const appShell = element<HTMLElement>("app-shell");
+const sidebar = element<HTMLElement>("sidebar");
+const sidebarToggle = element<HTMLButtonElement>("toggle-sidebar");
 const layersPanel = element<HTMLDivElement>("layers");
 const layersCollapse = element<HTMLButtonElement>("layers-collapse");
 const styleEditor = element<HTMLElement>("style-editor");
@@ -278,9 +281,7 @@ saveProject.addEventListener("click", async () => {
   saveProject.disabled = true;
   const project = projectStore.getState().project;
   const previousKey = remoteProjectKey;
-  const key = !previousKey || hasLegacyUuid(previousKey)
-    ? createProjectFileKey(project.name)
-    : previousKey;
+  const key = createProjectFileKey(project.name);
   try {
     if (key !== previousKey && (await listRemoteProjects()).some((item) => item.key === key)) {
       throw new Error("同名 Remote Project 已存在，请修改 Project name");
@@ -353,6 +354,16 @@ element("add-raster").addEventListener("click", (event) => {
     rect.bottom + 4,
   );
 });
+sidebarToggle.addEventListener("click", () => {
+  const open = sidebar.hidden;
+  const label = open ? "关闭侧边栏" : "打开侧边栏";
+  sidebar.hidden = !open;
+  appShell.classList.toggle("sidebar-hidden", !open);
+  sidebarToggle.dataset.tip = label;
+  sidebarToggle.ariaLabel = label;
+  sidebarToggle.ariaExpanded = String(open);
+  requestAnimationFrame(() => map.resize());
+});
 layersCollapse.addEventListener("click", () => {
   layersPanel.hidden = !layersPanel.hidden;
   layersCollapse.textContent = layersPanel.hidden ? "▸" : "▾";
@@ -375,8 +386,11 @@ async function loadInitialProject(): Promise<void> {
   if (key) {
     setStatus("正在打开上次的 Remote Project…");
     try {
-      projectStore.getState().loadProject(await readRemoteProject(key));
-      rememberRemoteProject(key);
+      const project = await readRemoteProject(key);
+      projectStore.getState().loadProject(project);
+      const migrated = (await listRemoteProjects())
+        .find((item) => item.aliases?.includes(key))?.key;
+      rememberRemoteProject(migrated ?? key);
       layersPanel.classList.remove("booting");
       setStatus("已恢复上次的 Remote Project");
       return;

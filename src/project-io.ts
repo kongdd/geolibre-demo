@@ -1,4 +1,8 @@
-import { parseProject, serializeProject, type GeoLibreProject } from "@geolibre/core";
+import {
+  DEFAULT_LAYER_STYLE,
+  parseProject,
+  type GeoLibreProject,
+} from "@geolibre/core";
 import type { FeatureCollection } from "geojson";
 import { PENDING_EE_TILES } from "../plugins/earthengine/run";
 import { getRasterAsset } from "./assets";
@@ -15,6 +19,7 @@ export interface RemoteProjectSummary {
   key: string;
   name: string;
   updatedAt: string;
+  aliases?: string[];
 }
 
 async function request(path = "", init?: RequestInit): Promise<Response> {
@@ -64,9 +69,7 @@ function assetName(
   layer: GeoLibreProject["layers"][number],
   extension: ".geojson" | ".tif" | ".tiff",
 ): string {
-  return validAssetName(layer.metadata.projectAsset)
-    ? layer.metadata.projectAsset
-    : `${projectFileStem(layer.id)}${extension}`;
+  return `${projectFileStem(layer.name)}${extension}`;
 }
 
 function assetUrl(key: string, file: string): string {
@@ -92,13 +95,19 @@ export async function prepareProjectForStorage(
 ): Promise<GeoLibreProject> {
   const clean = sanitizeGeeProject(project);
   const layers: GeoLibreProject["layers"] = [];
+  const assets = new Set<string>();
+  const reserve = (file: string, layer: GeoLibreProject["layers"][number]) => {
+    if (assets.has(file)) throw new Error(`存在同名数据图层：${layer.name}`);
+    assets.add(file);
+    return file;
+  };
 
   for (const layer of clean.layers) {
     if (layer.geojson) {
       const managed = validAssetName(layer.metadata.projectAsset);
       if (managed || !sourceUrl(layer)) {
         if (!key) throw new Error(`请先保存到 Remote：${layer.name} 尚无数据文件路径`);
-        const file = assetName(layer, ".geojson");
+        const file = reserve(assetName(layer, ".geojson"), layer);
         await uploadAsset(key, file, JSON.stringify(layer.geojson), "application/geo+json");
         layers.push({
           ...layer,
@@ -118,7 +127,7 @@ export async function prepareProjectForStorage(
       const raster = await getRasterAsset(rasterId);
       if (!raster) throw new Error(`本地栅格资产不可用：${layer.name}`);
       const extension = /\.tiff$/i.test(raster.name) ? ".tiff" : ".tif";
-      const file = assetName(layer, extension);
+      const file = reserve(assetName(layer, extension), layer);
       await uploadAsset(key, file, raster, raster.type || "image/tiff");
       const { assetId: _assetId, ...source } = layer.source;
       layers.push({
@@ -134,18 +143,24 @@ export async function prepareProjectForStorage(
       : null;
     const remoteSource = sourceUrl(layer);
     if (key && managed && remoteSource) {
-      const target = assetUrl(key, managed);
+      const extension = /\.tiff$/i.test(managed) ? ".tiff" : ".tif";
+      const file = reserve(assetName(layer, extension), layer);
+      const target = assetUrl(key, file);
       if (remoteSource !== target) {
         const response = await fetch(remoteSource);
         if (!response.ok) throw new Error(`无法复制 ${layer.name}：${response.status}`);
         await uploadAsset(
           key,
-          managed,
+          file,
           await response.blob(),
           response.headers.get("Content-Type") || "application/octet-stream",
         );
       }
-      layers.push({ ...layer, source: { ...layer.source, url: target } });
+      layers.push({
+        ...layer,
+        source: { ...layer.source, url: target },
+        metadata: { ...layer.metadata, projectAsset: file },
+      });
       continue;
     }
 
@@ -180,6 +195,44 @@ export async function hydrateProjectData(project: GeoLibreProject): Promise<GeoL
   };
 }
 
+function withoutDefaults(value: unknown, defaults: unknown): unknown {
+  if (Object.is(value, defaults)) return undefined;
+  if (!value || !defaults || typeof value !== "object" || typeof defaults !== "object") {
+    return value;
+  }
+  if (Array.isArray(value) || Array.isArray(defaults)) {
+    return JSON.stringify(value) === JSON.stringify(defaults) ? undefined : value;
+  }
+  const entries = Object.entries(value).flatMap(([key, item]) => {
+    const compact = withoutDefaults(item, (defaults as Record<string, unknown>)[key]);
+    return compact === undefined ? [] : [[key, compact] as const];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+/** 只写非默认配置；读取时 parseProject 会补齐默认值。 */
+export function serializeStoredProject(project: GeoLibreProject): string {
+  const compact = {
+    ...project,
+    layers: project.layers.map((layer) => {
+      const style = withoutDefaults(layer.style, DEFAULT_LAYER_STYLE);
+      return {
+        ...layer,
+        ...(style ? { style } : { style: undefined }),
+        ...(layer.visible === true ? { visible: undefined } : {}),
+        ...(layer.opacity === 1 ? { opacity: undefined } : {}),
+        ...(Object.keys(layer.metadata).length ? {} : { metadata: undefined }),
+      };
+    }),
+    ...(project.basemapVisible === true ? { basemapVisible: undefined } : {}),
+    ...(project.basemapOpacity === 1 ? { basemapOpacity: undefined } : {}),
+    ...(Object.keys(project.styles ?? {}).length ? {} : { styles: undefined }),
+    ...(Object.keys(project.metadata ?? {}).length ? {} : { metadata: undefined }),
+    id: undefined,
+  };
+  return JSON.stringify(compact, null, 2);
+}
+
 export async function readProjectFile(file: File): Promise<GeoLibreProject> {
   return hydrateProjectData(parseProject(await file.text()));
 }
@@ -198,7 +251,7 @@ export async function saveRemoteProject(key: string, project: GeoLibreProject): 
   await request(`/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: serializeProject(stored),
+    body: serializeStoredProject(stored),
   });
 }
 
@@ -212,7 +265,7 @@ export async function downloadProject(
 ): Promise<void> {
   const fileKey = remoteKey ?? createProjectFileKey(project.name);
   const stored = await prepareProjectForStorage(remoteKey, project);
-  const blob = new Blob([serializeProject(stored)], { type: "application/json" });
+  const blob = new Blob([serializeStoredProject(stored)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

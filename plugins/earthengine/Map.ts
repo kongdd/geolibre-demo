@@ -1,6 +1,9 @@
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer, type LayerStyle } from "@geolibre/core";
+import { getLayerBounds } from "@geolibre/map/headless";
 import type { ImageCollection } from "@google/earthengine";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import type { Feature, FeatureCollection, Geometry, Position } from "geojson";
+import shp from "shpjs";
 import {
   createGeometryLayer,
   isGeometryLayer,
@@ -10,7 +13,7 @@ import {
   pointFeature,
   polygonFeature,
   rectangleRing,
-} from "../../src/geometry";
+} from "../geometry/geometry";
 import { projectStore } from "../../src/project-store";
 import {
   ee,
@@ -50,6 +53,7 @@ export type AddOpts = {
   group?: string;
   zoom?: boolean;
   attribution?: string;
+  bounds?: [number, number, number, number];
 };
 
 /** GEE `visParams`：矢量 `color`/`fillColor`/`width`；栅格 `min`/`max`/`palette`。 */
@@ -70,6 +74,7 @@ export type VisParams = {
   composite?: "yearSum";
   year?: number;
   scale?: number;
+  bounds?: [number, number, number, number];
 };
 
 export function sniff(src: AddSrc, hint?: AddKind): AddKind {
@@ -118,6 +123,7 @@ function applyOpts(layer: GeoLibreLayer, opts: AddOpts): GeoLibreLayer {
   if (opts.group) layer.groupId = opts.group;
   if (opts.opacity !== undefined) layer.opacity = opts.opacity;
   if (opts.visible !== undefined) layer.visible = opts.visible;
+  if (opts.bounds) layer.source = { ...layer.source, bounds: opts.bounds };
   const style: LayerStyle = { ...layer.style };
   if (opts.color) {
     style.strokeColor = opts.color;
@@ -174,6 +180,7 @@ export function visToOpts(
     if (vis.stretch) opts.stretch = vis.stretch;
     if (vis.transparentBelowMin) opts.transparentBelowMin = true;
     if (vis.opacity !== undefined) opts.opacity = vis.opacity;
+    if (vis.bounds) opts.bounds = vis.bounds;
   }
   if (name) opts.name = name;
   if (shown !== undefined) opts.visible = shown;
@@ -182,6 +189,11 @@ export function visToOpts(
 }
 
 async function fetchGeoJSON(url: string): Promise<FeatureCollection> {
+  if (/\.shp(?:[?#]|$)/i.test(url)) {
+    const load = shp as unknown as (source: string) => Promise<unknown>;
+    const source = typeof document === "undefined" ? url : new URL(url, document.location.href).href;
+    return asCollection(await load(source));
+  }
   const response = await fetch(url);
   if (!response.ok) throw new Error(`下载失败 ${response.status}: ${url}`);
   return asCollection(await response.json());
@@ -439,15 +451,29 @@ export const addPolygon = (ring: Position[], opts: AddOpts = {}) => commitGeomet
 export const addRect = (a: Position, b: Position, opts: AddOpts = {}) =>
   commitGeometry(polygonFeature(rectangleRing(a, b)), opts);
 
-/** GEE `Map.addLayer`；挂在原生构造器上，不覆盖 `new Map()`。 */
-export const Map = { addLayer };
+/** 将图层中心移至视口，并设置缩放级别。 */
+export function centerObject(layer: GeoLibreLayer, zoomLevel: number): void {
+  const map = typeof window === "undefined" ? undefined : window.__map;
+  if (!map) return;
+  const bounds = getLayerBounds(layer);
+  if (!bounds) return;
+  map.jumpTo({
+    center: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2],
+    zoom: zoomLevel,
+  });
+}
+
+/** GEE `Map` API；挂在原生构造器上，不覆盖 `new Map()`。 */
+export const Map = { addLayer, centerObject };
 Object.assign(globalThis.Map, Map);
 
 declare global {
   interface MapConstructor {
     addLayer: typeof addLayer;
+    centerObject: typeof centerObject;
   }
   interface Window {
+    __map?: MapLibreMap;
     ee: typeof import("./ee").ee;
   }
 }

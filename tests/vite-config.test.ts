@@ -7,3 +7,8 @@ test("production build preserves Earth Engine method parameters", () => {
   assert.equal(config.esbuild && "minifyIdentifiers" in config.esbuild, true);
   assert.equal(config.esbuild && config.esbuild.minifyIdentifiers, false);
 });
+
+test("demo has no SpatialHydro proxy", () => {
+  assert.equal(config.server?.proxy, undefined);
+  assert.equal(config.preview?.proxy, undefined);
+});

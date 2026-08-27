@@ -5,6 +5,7 @@ import {
   addMarker,
   asCollection,
   bindEarthEngine,
+  centerObject,
   ee,
   isEe,
   isGeeRaster,
@@ -16,7 +17,7 @@ import {
   tilesFromMapId,
   visToOpts,
 } from "@geolibre/plugins/earthengine";
-import { isGeometryLayer } from "../src/geometry";
+import { isGeometryLayer } from "../plugins/geometry/geometry";
 import { projectStore } from "../src/project-store";
 
 test("sniff url / hint", () => {
@@ -65,6 +66,27 @@ test("layersOf xyz", async () => {
   assert.equal(layer.type, "xyz");
   assert.equal(layer.name, "OSM");
   assert.deepEqual(layer.source.tiles, [url]);
+});
+
+test("Map.centerObject centers a bounded layer", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const views: unknown[] = [];
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { __map: { jumpTo: (view: unknown) => views.push(view) } },
+  });
+  try {
+    const layer = Map.addLayer(
+      "https://a/{z}/{x}/{y}.png",
+      { bounds: [105, 28, 117, 35] },
+      "tiles",
+    );
+    centerObject(layer, 7);
+    assert.deepEqual(views, [{ center: [111, 31.5], zoom: 7 }]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous);
+    else delete (globalThis as { window?: unknown }).window;
+  }
 });
 
 test("visToOpts maps GEE vis / name / shown / opacity", () => {
@@ -164,6 +186,7 @@ test("ee types dispatch vector vs raster", () => {
 
 test("Map.addLayer is sync like GEE", () => {
   assert.equal(globalThis.Map.addLayer, addLayer);
+  assert.equal(globalThis.Map.centerObject, centerObject);
   assert.equal(new globalThis.Map([[1, 2]]).get(1), 2);
   projectStore.getState().newProject("Map");
   const layer = Map.addLayer(

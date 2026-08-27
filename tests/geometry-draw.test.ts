@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clickDraw, emptyDraw, finishDraw, finishRect, previewDraw, setDrawMode } from "../src/geometry-draw";
+import { clickDraw, emptyDraw, finishDraw, finishRect, previewDraw, setDrawMode } from "../plugins/geometry/geometry-draw";
 
 const a: [number, number] = [0, 0];
 const b: [number, number] = [2, 0];

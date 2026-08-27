@@ -8,8 +8,7 @@ import {
   occludedBasemapIds,
 } from "./layer-order";
 import { projectStore } from "./project-store";
-import { isGeometryLayer } from "./geometry";
-import { raiseGeometryLayers } from "./geometry-editor";
+import { isGeometryLayer, raiseGeometryLayers } from "@geolibre/plugins/geometry";
 import { syncGeeRaster } from "@geolibre/plugins/earthengine";
 import { isProjectRaster, type RasterAdapter } from "./raster";
 

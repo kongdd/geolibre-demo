@@ -1,6 +1,6 @@
 import { buildLayerTree, type GeoLibreLayer, type LayerGroup } from "@geolibre/core";
+import { collectionKind } from "@geolibre/plugins/geometry";
 import { button } from "./dom";
-import { collectionKind } from "./geometry";
 import { dropInsertIndex } from "./layer-order";
 import { projectStore } from "./project-store";
 import { openLayerStyle, type LayerUiActions } from "./style-editor";

@@ -12,7 +12,8 @@
     "noEmit": true,
     "paths": {
       "@geolibre/plugins/basemap-thumbnails": ["./plugins/basemap-thumbnails.ts"],
-      "@geolibre/plugins/earthengine": ["./plugins/earthengine/index.ts"]
+      "@geolibre/plugins/earthengine": ["./plugins/earthengine/index.ts"],
+      "@geolibre/plugins/geometry": ["./plugins/geometry/index.ts"]
     }
   },
   "include": ["src", "geolibre", "tests", "vite.config.ts", "plugins"],

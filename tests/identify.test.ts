@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GEOMETRY_KIND } from "../src/geometry";
+import { GEOMETRY_KIND } from "../plugins/geometry/geometry";
 import { formatIdentifyValue, styleIdsFor } from "../src/identify";
 
 test("styleIdsFor maps geojson and geometry layers", () => {

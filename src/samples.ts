@@ -2,9 +2,12 @@ import type { GeoLibreLayer } from "@geolibre/core";
 import { ee } from "@geolibre/plugins/earthengine";
 import { projectStore } from "./project-store";
 
+const HYDRO_BOUNDS: [number, number, number, number] = [105.6292, 28.8275, 116.745, 34.5483];
+
 const SAMPLE = {
-  flowDirection: `${import.meta.env.BASE_URL}api/raster/hubei-flow-direction/file.tif`,
-  flowAccumulation: `${import.meta.env.BASE_URL}api/flow-accumulation/{z}/{x}/{y}?min=3000`,
+  flowDirection: `${import.meta.env.BASE_URL}data/hubei-flow-direction.cog.tif`,
+  flowAccumulation: `${import.meta.env.BASE_URL}data/hubei-flow-accumulation.cog.tif`,
+  shiyanBoundary: `${import.meta.env.BASE_URL}data/shp/poly_十堰市界.shp`,
   countries:
     "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
   rivers:
@@ -26,6 +29,20 @@ export async function loadDemoLayers(): Promise<string> {
     Map.addLayer(SAMPLE.rivers, { stroke: "#1d4ed8", width: 1.6 }, "世界河流"),
     // Map.addLayer(SAMPLE.dem, { colormap: "terrain", opacity: 0.85 }, "DEM"),
   ]);
+
+  // 流向与累积流
+  const flowAccumulation = Map.addLayer(
+    SAMPLE.flowAccumulation,
+    {
+      min: 1000,
+      max: 1_000_000,
+      colormap: "viridis",
+      stretch: "log",
+      opacity: 0.8,
+      bounds: HYDRO_BOUNDS,
+    },
+    "湖北累积流",
+  );
   layers.push(
     ...addGroup("湖北水文", [
       Map.addLayer(
@@ -34,9 +51,15 @@ export async function loadDemoLayers(): Promise<string> {
         "湖北流向",
         false,
       ),
-      Map.addLayer(SAMPLE.flowAccumulation, { opacity: 0.8 }, "湖北累积流"),
+      flowAccumulation,
+      Map.addLayer(
+        SAMPLE.shiyanBoundary,
+        { fill: "#00000000", stroke: "#ff0000", width: 0.6 },
+        "十堰市界",
+      ),
     ]),
   );
+  Map.centerObject(flowAccumulation, 7);
 
   await ee.Initialize();
   const layers_gee = addGroup("GEE", [

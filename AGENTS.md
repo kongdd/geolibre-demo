@@ -42,10 +42,10 @@ UI / 文件 → projectStore → createProjectRenderer
 | `src/vector.ts` | GeoJSON / zip Shapefile |
 | `src/raster.ts` | COG / 本地 GeoTIFF |
 | `src/assets.ts` | 本地栅格 IndexedDB |
-| `src/geometry.ts` / `geometry-editor.ts` | 手绘几何 |
 | `src/style-editor.ts` | 图层样式 |
 | `plugins/basemap-thumbnails.ts` | 底图缩略图；`./sync_geolibre.sh` 从主仓复制 |
 | `plugins/earthengine/` | GEE（`@geolibre/plugins/earthengine`）：`ee.ts` / `Map.ts`，`plugin.ts` → `/api/ee/*` |
+| `plugins/geometry/` | 手绘几何（`@geolibre/plugins/geometry`） |
 
 栅格（`project-raster`）与几何（`gee-geometry`）不走 `createLayerSync`。
 

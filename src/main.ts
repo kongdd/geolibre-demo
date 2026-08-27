@@ -17,7 +17,7 @@ import {
   closeGeometryEditor,
   isGeometryEditorOpen,
   openGeometryEditor,
-} from "./geometry-editor";
+} from "@geolibre/plugins/geometry";
 import { bindIdentify, closeIdentify } from "./identify";
 import { bindLegend } from "./legend";
 import {

@@ -16,7 +16,7 @@ import {
   polygonFeature,
   rectangleRing,
   vertexCount,
-} from "../src/geometry";
+} from "../plugins/geometry/geometry";
 
 test("vertexCount counts points and open rings", () => {
   const collection = emptyCollection();

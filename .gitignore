@@ -1,4 +1,6 @@
 dist
 *lock*
-
 images
+
+*.tif
+shp

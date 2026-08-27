@@ -71,6 +71,33 @@ await page.waitForFunction(() =>
     ({ text }) => text === "湖北流向",
   ),
 );
+const panelLayout = await page.evaluate(() => {
+  const pick = document.querySelector(".watershed-pick")!;
+  const run = document.querySelector("[data-run]")!;
+  return {
+    hasWatershedName: Boolean(document.querySelector("[data-name]")),
+    stationLabel: document.querySelector("[data-outlet-name]")?.previousElementSibling?.textContent,
+    runFollowsPick: pick.nextElementSibling?.contains(run),
+    hasPointHeading: Boolean(document.querySelector(".watershed-points > span")),
+  };
+});
+assert.deepEqual(panelLayout, {
+  hasWatershedName: false,
+  stationLabel: "站点",
+  runFollowsPick: true,
+  hasPointHeading: false,
+});
+
+const watershedPanel = page.locator(".watershed-panel");
+const resizeHandle = page.locator(".watershed-resizer");
+const beforeResize = (await watershedPanel.boundingBox())!;
+const handleBox = (await resizeHandle.boundingBox())!;
+await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+await page.mouse.down();
+await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y - 80);
+await page.mouse.up();
+const afterResize = (await watershedPanel.boundingBox())!;
+assert(afterResize.height > beforeResize.height + 40);
 
 const optionNames = await page.evaluate(() => ({
   flowdir: [...document.querySelector<HTMLSelectElement>("[data-flowdir]")!.options].map(
@@ -99,12 +126,24 @@ await page.mouse.wheel(0, -500);
 await page.waitForTimeout(600);
 assert((await page.evaluate(() => window.__map!.getZoom())) > before);
 await canvas.click({ position: { x: bounds.width / 2, y: bounds.height / 2 } });
+await page.click("[data-pick]");
+await canvas.click({ position: { x: bounds.width / 2 + 20, y: bounds.height / 2 } });
+const stationNames = await page.locator(".watershed-point-row input[aria-label='出水口名称']").evaluateAll(
+  (inputs) => inputs.map((input) => (input as HTMLInputElement).value),
+);
+assert.deepEqual(stationNames, ["站点2", "站点1"]);
+await page.locator(".watershed-point-row input[type='checkbox']").first().uncheck();
 await page.click("[data-run]");
-await page.waitForFunction(() => document.querySelector("#status")?.textContent?.includes("流域提取完成"));
+await page.waitForFunction(() =>
+  document.querySelector("#status")?.textContent?.includes("流域提取完成"),
+);
+const pointStatus = (await page.locator(".watershed-point-list").textContent()) ?? "";
+assert(pointStatus.includes("12 km²"));
+assert(!pointStatus.includes("已提取"));
 assert.equal(downloads, 0);
 
 const tree = (await page.locator("#layers").textContent()) ?? "";
-for (const text of ["Pours", "Basins", "Pour_出水口 1", "流域 1"]) {
+for (const text of ["Pours", "Basins", "Pour_站点1", "Basin_站点1"]) {
   assert(tree.includes(text), `缺少 ${text}:\n${tree}`);
 }
 await page.click("#save-project");
@@ -127,8 +166,8 @@ page.once("dialog", (dialog) => void dialog.accept());
 await page.click(".watershed-point-delete");
 await page.waitForFunction(() => !document.querySelector(".watershed-point-delete"));
 const deletedTree = (await page.locator("#layers").textContent()) ?? "";
-assert(!deletedTree.includes("流域 1"));
-assert(!deletedTree.includes("Pour_出水口 1"));
+assert(!deletedTree.includes("Basin_站点1"));
+assert(!deletedTree.includes("Pour_站点1"));
 await page.evaluate((projectKey) =>
   fetch(`/project-demo/api/projects/${encodeURIComponent(projectKey)}`, { method: "DELETE" }), key);
 assert.equal(errors.length, 0, errors.join("\n"));

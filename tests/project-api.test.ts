@@ -12,7 +12,7 @@ import {
   readStoredProject,
   writeStoredAsset,
   writeStoredProject,
-} from "../plugins/projects/plugin";
+} from "../src/project/plugin";
 import { PROJECT_SUFFIX } from "../src/project/filename";
 
 test("remote project storage keeps project and data in separate files", async () => {

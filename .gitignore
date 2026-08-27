@@ -6,3 +6,6 @@ public/projects/*/
 
 *.tif
 shp
+
+## 数据清洗脚本
+*.R

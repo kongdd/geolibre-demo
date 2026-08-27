@@ -14,10 +14,11 @@ import {
 } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { basename, dirname, join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { parseProject } from "@geolibre/core";
 import type { Plugin } from "vite";
-import { PROJECT_SUFFIX } from "geolibre-lite/project/filename";
+import { PROJECT_SUFFIX } from "./filename.ts";
 
 const PROJECT_DIR = fileURLToPath(new URL("../../public/projects/", import.meta.url));
 const PROJECT_BODY_LIMIT = 10 * 1024 * 1024;
@@ -35,6 +36,10 @@ export interface RemoteProjectSummary {
 export interface ProjectRoute {
   key?: string;
   asset?: string;
+}
+
+function httpError(message: string, status = 400): never {
+  throw Object.assign(new Error(message), { status });
 }
 
 function valid(value: string, pattern: RegExp): boolean {
@@ -62,9 +67,7 @@ export function projectRoute(pathname: string): ProjectRoute | null {
 }
 
 function projectPath(directory: string, key: string): string {
-  if (!valid(key, PROJECT_KEY)) {
-    throw Object.assign(new Error("invalid project key"), { status: 400 });
-  }
+  if (!valid(key, PROJECT_KEY)) httpError("invalid project key");
   return join(directory, `${key}${PROJECT_SUFFIX}`);
 }
 
@@ -74,9 +77,7 @@ function projectDataPath(directory: string, key: string): string {
 }
 
 function assetPath(directory: string, key: string, asset: string): string {
-  if (!validAssetPath(asset)) {
-    throw Object.assign(new Error("invalid asset path"), { status: 400 });
-  }
+  if (!validAssetPath(asset)) httpError("invalid asset path");
   return join(projectDataPath(directory, key), asset);
 }
 
@@ -172,10 +173,10 @@ export async function writeStoredProject(
   try {
     project = parseProject(content);
   } catch {
-    throw Object.assign(new Error("invalid project"), { status: 400 });
+    httpError("invalid project");
   }
   if (project.layers.some((layer) => layer.geojson || typeof layer.source.assetId === "string")) {
-    throw Object.assign(new Error("project data must be stored as file references"), { status: 400 });
+    httpError("project data must be stored as file references");
   }
   await mkdir(directory, { recursive: true });
   const path = projectPath(directory, key);
@@ -206,9 +207,7 @@ export async function writeStoredAsset(
     for await (const chunk of chunks) {
       const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
       size += buffer.byteLength;
-      if (size > ASSET_BODY_LIMIT) {
-        throw Object.assign(new Error("asset too large"), { status: 413 });
-      }
+      if (size > ASSET_BODY_LIMIT) httpError("asset too large", 413);
       await file.write(buffer);
     }
     await file.close();
@@ -258,9 +257,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > PROJECT_BODY_LIMIT) {
-      throw Object.assign(new Error("project too large"), { status: 413 });
-    }
+    if (size > PROJECT_BODY_LIMIT) httpError("project too large", 413);
     chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -275,12 +272,12 @@ function assetType(name: string): string {
 function rangeOf(header: string | undefined, size: number): [number, number] | null {
   if (!header) return null;
   const match = header.match(/^bytes=(\d*)-(\d*)$/);
-  if (!match) throw Object.assign(new Error("invalid range"), { status: 416 });
+  if (!match) httpError("invalid range", 416);
   const suffix = match[1] === "";
   const start = suffix ? Math.max(0, size - Number(match[2])) : Number(match[1]);
   const end = suffix || match[2] === "" ? size - 1 : Math.min(size - 1, Number(match[2]));
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || start > end || start >= size) {
-    throw Object.assign(new Error("invalid range"), { status: 416 });
+    httpError("invalid range", 416);
   }
   return [start, end];
 }
@@ -301,12 +298,7 @@ async function serveAsset(
   res.setHeader("Content-Length", end - start + 1);
   if (range) res.setHeader("Content-Range", `bytes ${start}-${end}/${size}`);
   if (req.method === "HEAD") return void res.end();
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(path, { start, end });
-    stream.on("error", reject);
-    res.on("finish", resolve);
-    stream.pipe(res);
-  });
+  await pipeline(createReadStream(path, { start, end }), res);
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse, next: () => void): Promise<void> {

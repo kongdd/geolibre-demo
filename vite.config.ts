@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { eeAuthPlugin } from "./plugins/earthengine/plugin.ts";
-import { projectApiPlugin } from "./plugins/projects/plugin.ts";
+import { piAgentPlugin } from "./plugins/pi-agent/plugin.ts";
+import { projectApiPlugin } from "./src/project/plugin.ts";
 
 const watershedProxy = {
   target: process.env.SPATIALHYDRO_API_URL ?? "http://127.0.0.1:8765",
@@ -12,10 +13,11 @@ const watershedProxy = {
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
   base: "/project-demo/",
-  plugins: [eeAuthPlugin(), projectApiPlugin()],
+  plugins: [eeAuthPlugin(), projectApiPlugin(), piAgentPlugin()],
   // Earth Engine 通过形参名解析位置参数；禁止压缩器改名。
   esbuild: { minifyIdentifiers: false },
-  build: { minify: "esbuild" },
+  // /mnt/z 的 public/data 符号链接会生成无法清理的 CIFS 占位文件。
+  build: { minify: "esbuild", emptyOutDir: false },
   server: {
     host: "127.0.0.1",
     port: 5187,

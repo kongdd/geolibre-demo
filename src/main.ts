@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "maplibre-gl-basemap-control/style.css";
 import "maplibre-gl-raster/style.css";
 import { ee } from "@geolibre/plugins/earthengine";
+import { bindPiAgent } from "../plugins/pi-agent";
 import { bindWatershedPlugin } from "../plugins/watershed";
 import { bindBasemaps } from "./basemap";
 import { deleteRasterAsset } from "./assets";
@@ -115,6 +116,10 @@ const map = new maplibregl.Map({
   bearing: initial.mapView.bearing,
   pitch: initial.mapView.pitch,
 });
+let mapReady = map.loaded();
+map.once("load", () => {
+  mapReady = true;
+});
 (window as Window & { __map?: maplibregl.Map }).__map = map;
 window.ee = ee;
 ee.Initialize();
@@ -170,6 +175,10 @@ bindLegend(element<HTMLElement>("legend"));
 bindLayerTree(layersPanel, layerActions);
 bindGeometryEditor(map, element("geom-bar"));
 bindIdentify(map, element("identify"), rasterAdapter);
+bindPiAgent(() => {
+  if (mapReady) map.resize();
+  else map.once("load", () => map.resize());
+});
 element("draw-geometry").addEventListener("click", () => {
   closeIdentify();
   openGeometryEditor();

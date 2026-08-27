@@ -16,6 +16,12 @@ export function formatElapsed(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
 }
 
+export function formatArea(areaKm2?: number): string {
+  return typeof areaKm2 === "number" && Number.isFinite(areaKm2)
+    ? `${Math.round(areaKm2).toLocaleString("zh-CN")} km²`
+    : "— km²";
+}
+
 export interface WatershedRasterOption {
   id: string;
   name: string;
@@ -75,18 +81,21 @@ export function draftsFromLayers(layers: GeoLibreLayer[]): WatershedDraft[] {
     const [lon, lat] = feature.geometry.coordinates;
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
     const rawId = Number(feature.properties?.id);
+    const id = Number.isSafeInteger(rawId) && rawId > 0 ? rawId : drafts.length + 1;
     const name =
       (typeof feature.properties?.name === "string" && feature.properties.name) ||
-      layer.name.replace(/^Pour_/, "") ||
-      `出水口 ${drafts.length + 1}`;
+      layer.name.match(/^Pour_(.+)$/)?.[1] ||
+      `站点${id}`;
+    const areaKm2 = Number(layer.metadata.watershedAreaKm2);
     drafts.push({
-      id: Number.isSafeInteger(rawId) && rawId > 0 ? rawId : drafts.length + 1,
+      id,
       name,
       lon,
       lat,
       key: typeof layer.metadata.pourPointKey === "string" ? layer.metadata.pourPointKey : layer.id,
       selected: false,
       extracted: true,
+      ...(Number.isFinite(areaKm2) ? { areaKm2 } : {}),
     });
   }
   return drafts;
@@ -169,29 +178,26 @@ export function bindWatershedPlugin(
   panel.className = "watershed-panel";
   panel.hidden = true;
   panel.innerHTML = `
+    <button type="button" class="watershed-resizer" data-resize aria-label="调整流域提取窗口高度" title="向上拖动扩大窗口"></button>
     <div class="section-title"><strong>流域提取</strong><button type="button" data-close aria-label="关闭流域提取">×</button></div>
-    <label class="field"><span>流域名称</span><input data-name value="流域 1" /></label>
-    <label class="field watershed-snap"><span>重新提取</span><input data-reextract type="checkbox" title="替换同名流域及其出水口" /></label>
+    <label class="field watershed-snap"><span>重新提取</span><input data-reextract type="checkbox" title="替换所选站点已有的流域及出水口" /></label>
     <label class="field"><span>流向栅格</span><select data-flowdir aria-label="FlowDir"></select></label>
     <label class="field watershed-snap"><span>河道捕捉</span><input data-snap type="checkbox" /></label>
     <label class="field" data-flowaccu-row hidden><span>累积流栅格</span><select data-flowaccu aria-label="FlowAccum"></select></label>
     <label class="field" data-distance-row hidden><span>距离 (m)</span><input data-distance type="number" min="0" value="200" /></label>
     <div class="watershed-pick">
-      <label><span>出水口名称</span><input data-outlet-name value="出水口 1" /></label>
+      <label><span>站点</span><input data-outlet-name value="站点1" /></label>
       <button type="button" data-pick>地图选点</button>
     </div>
-    <div class="watershed-points">
-      <span>出水口 <small>勾选本次提取的点</small></span>
-      <div class="watershed-point-list" data-point-list></div>
-    </div>
-    <div class="watershed-actions"><button type="button" data-run>开始提取</button></div>`;
+    <div class="watershed-actions"><button type="button" data-run>开始提取</button></div>
+    <div class="watershed-point-list" data-point-list></div>`;
   document.querySelector("aside")?.append(panel);
 
+  const resizeHandle = panel.querySelector<HTMLButtonElement>("[data-resize]")!;
   const flowdir = panel.querySelector<HTMLSelectElement>("[data-flowdir]")!;
   const flowaccu = panel.querySelector<HTMLSelectElement>("[data-flowaccu]")!;
   const snap = panel.querySelector<HTMLInputElement>("[data-snap]")!;
   const distance = panel.querySelector<HTMLInputElement>("[data-distance]")!;
-  const resultName = panel.querySelector<HTMLInputElement>("[data-name]")!;
   const reextract = panel.querySelector<HTMLInputElement>("[data-reextract]")!;
   const outletName = panel.querySelector<HTMLInputElement>("[data-outlet-name]")!;
   const pointList = panel.querySelector<HTMLElement>("[data-point-list]")!;
@@ -204,11 +210,39 @@ export function bindWatershedPlugin(
   let request: AbortController | null = null;
   let previousCursor = "";
   let previewMarker: Marker | null = null;
-  let extractionIndex = 1;
   const draftMarkers = new Map<string, Marker>();
   const drafts: WatershedDraft[] = [];
   let projectId = projectStore.getState().project.id;
   let pourSignature = "";
+  let minimumPanelHeight = 0;
+
+  function resizePanel(height: number): void {
+    minimumPanelHeight ||= panel.getBoundingClientRect().height;
+    const available = (panel.parentElement?.clientHeight ?? innerHeight) - 128;
+    panel.style.height = `${Math.max(minimumPanelHeight, Math.min(height, available))}px`;
+    panel.classList.add("resized");
+  }
+
+  resizeHandle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = panel.getBoundingClientRect().height;
+    resizeHandle.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent) => resizePanel(startHeight + startY - next.clientY);
+    const stop = () => {
+      resizeHandle.removeEventListener("pointermove", move);
+      resizeHandle.removeEventListener("pointerup", stop);
+      resizeHandle.removeEventListener("pointercancel", stop);
+    };
+    resizeHandle.addEventListener("pointermove", move);
+    resizeHandle.addEventListener("pointerup", stop);
+    resizeHandle.addEventListener("pointercancel", stop);
+  });
+  resizeHandle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    resizePanel(panel.getBoundingClientRect().height + (event.key === "ArrowUp" ? 32 : -32));
+  });
 
   function setOptions(
     select: HTMLSelectElement,
@@ -240,18 +274,23 @@ export function bindWatershedPlugin(
 
   function renameAsset(key: string, name: string): void {
     const state = projectStore.getState();
-    const layer = state.project.layers.find((item) => item.metadata.pourPointKey === key);
-    if (!layer?.geojson) return;
-    state.updateLayer(layer.id, {
-      name: `Pour_${name}`,
-      geojson: {
-        ...layer.geojson,
-        features: layer.geojson.features.map((feature) => ({
-          ...feature,
-          properties: { ...(feature.properties ?? {}), name },
-        })),
-      },
-    });
+    for (const layer of state.project.layers.filter(
+      (item) => item.metadata.pourPointKey === key,
+    )) {
+      if (!layer.geojson) continue;
+      const prefix = layer.metadata.watershedRole === "basin" ? "Basin" : "Pour";
+      state.updateLayer(layer.id, {
+        name: `${prefix}_${name}`,
+        metadata: { ...layer.metadata, watershedName: name },
+        geojson: {
+          ...layer.geojson,
+          features: layer.geojson.features.map((feature) => ({
+            ...feature,
+            properties: { ...(feature.properties ?? {}), name, watershedName: name },
+          })),
+        },
+      });
+    }
   }
 
   function pointMarker(className: string): Marker {
@@ -285,7 +324,7 @@ export function bindWatershedPlugin(
       return;
     }
     pointList.replaceChildren(
-      ...drafts.map((draft) => {
+      ...[...drafts].reverse().map((draft) => {
         const row = document.createElement("div");
         const selected = document.createElement("input");
         const name = document.createElement("input");
@@ -315,11 +354,7 @@ export function bindWatershedPlugin(
         });
         coordinates.className = "coordinates";
         coordinates.textContent = `${draft.lon.toFixed(3)}, ${draft.lat.toFixed(3)}`;
-        status.textContent = draft.areaKm2
-          ? `${draft.areaKm2.toLocaleString("zh-CN", { maximumFractionDigits: 1 })} km²`
-          : draft.extracted
-            ? "已提取"
-            : "待提取";
+        status.textContent = draft.extracted ? formatArea(draft.areaKm2) : "待提取";
         status.className = `status${draft.extracted ? " done" : ""}`;
         row.append(selected, name, coordinates, status);
         if (draft.extracted) {
@@ -367,7 +402,7 @@ export function bindWatershedPlugin(
     const keys = new Set(restored.map((draft) => draft.key));
     drafts.length = 0;
     drafts.push(...restored, ...unextracted.filter((draft) => !keys.has(draft.key)));
-    outletName.value = `出水口 ${drafts.length + 1}`;
+    outletName.value = `站点${drafts.length + 1}`;
     renderPoints();
   }
 
@@ -420,12 +455,12 @@ export function bindWatershedPlugin(
   function pickAtClick(event: MapMouseEvent): void {
     disarm();
     const index = drafts.length + 1;
-    const name = outletName.value.trim() || `出水口 ${index}`;
+    const name = outletName.value.trim() || `站点${index}`;
     try {
       appendPoints([
         { id: index, name, lon: event.lngLat.lng, lat: event.lngLat.lat },
       ]);
-      outletName.value = `出水口 ${index + 1}`;
+      outletName.value = `站点${index + 1}`;
       setStatus(`已添加“${name}”`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error), true);
@@ -454,13 +489,16 @@ export function bindWatershedPlugin(
         lon,
         lat,
       }));
-      const name = resultName.value.trim();
-      if (!name) throw new Error("请输入流域名称");
+      const selectedKeys = new Set(selectedDrafts.map(({ key }) => key));
       const existingLayers = projectStore
         .getState()
-        .project.layers.filter((layer) => layer.metadata.watershedName === name);
+        .project.layers.filter(
+          (layer) =>
+            typeof layer.metadata.pourPointKey === "string" &&
+            selectedKeys.has(layer.metadata.pourPointKey),
+        );
       if (existingLayers.length && !reextract.checked) {
-        throw new Error(`“${name}”已存在；如需替换，请勾选“重新提取”`);
+        throw new Error("所选站点已有流域；如需替换，请勾选“重新提取”");
       }
       const flowdirValue = selectedRaster(flowdir);
       const flowaccuValue = selectedRaster(flowaccu);
@@ -484,13 +522,10 @@ export function bindWatershedPlugin(
       }).extract(outlets, current.signal);
       const watershed = result.watershed as FeatureCollection | null;
       const pointAssets = outletsToGeoJSON(outlets);
-      const basinNames = new Map(
-        outlets.map((outlet) => [
-          outlet.id,
-          outlets.length === 1 ? name : `${name} · ${outlet.name}`,
-        ]),
-      );
       const pointNames = new Map(outlets.map((outlet) => [outlet.id, outlet.name]));
+      const basinAreas = new Map(
+        result.response.basin_stats.map(({ id, area_km2 }) => [id, area_km2]),
+      );
       const state = projectStore.getState();
       const layers: GeoLibreLayer[] = [];
       const basinGroupId =
@@ -500,15 +535,35 @@ export function bindWatershedPlugin(
         projectStore.getState().project.layerGroups?.find((group) => group.name === "Pours")?.id ??
         projectStore.getState().addGroup("Pours");
       if (watershed?.features.length) {
-        const collection = nameFeatures(watershed, basinNames);
-        collection.features = collection.features.map((feature) => ({
-          ...feature,
-          properties: { ...(feature.properties ?? {}), watershedName: name },
-        }));
-        const layer = createVectorLayer(name, collection, state.project.layers);
-        layer.groupId = basinGroupId;
-        layer.metadata = { watershedName: name, watershedRole: "basin" };
-        layers.push(layer);
+        for (const [index, outlet] of outlets.entries()) {
+          const features = watershed.features.filter((feature) => featureId(feature) === outlet.id);
+          if (!features.length) continue;
+          const collection = nameFeatures(
+            { ...watershed, features },
+            new Map([[outlet.id, outlet.name]]),
+          );
+          collection.features = collection.features.map((feature) => ({
+            ...feature,
+            properties: {
+              ...(feature.properties ?? {}),
+              watershedName: outlet.name,
+              area_km2: basinAreas.get(outlet.id),
+            },
+          }));
+          const layer = createVectorLayer(
+            `Basin_${outlet.name}`,
+            collection,
+            [...state.project.layers, ...layers],
+          );
+          layer.groupId = basinGroupId;
+          layer.metadata = {
+            watershedName: outlet.name,
+            watershedRole: "basin",
+            pourPointKey: selectedDrafts[index]!.key,
+            watershedAreaKm2: basinAreas.get(outlet.id),
+          };
+          layers.push(layer);
+        }
       }
       for (const [index, outlet] of outlets.entries()) {
         const key = selectedDrafts[index]!.key;
@@ -516,7 +571,12 @@ export function bindWatershedPlugin(
           .filter((feature) => featureId(feature) === outlet.id)
           .map((feature) => ({
             ...feature,
-            properties: { ...(feature.properties ?? {}), watershedName: name, pourPointKey: key },
+            properties: {
+              ...(feature.properties ?? {}),
+              watershedName: outlet.name,
+              pourPointKey: key,
+              area_km2: basinAreas.get(outlet.id),
+            },
           }));
         const layer = createVectorLayer(
           `Pour_${outlet.name}`,
@@ -525,9 +585,10 @@ export function bindWatershedPlugin(
         );
         layer.groupId = pourGroupId;
         layer.metadata = {
-          watershedName: name,
+          watershedName: outlet.name,
           watershedRole: "pour-point",
           pourPointKey: key,
+          watershedAreaKm2: basinAreas.get(outlet.id),
           userAsset: true,
         };
         layers.push(layer);
@@ -538,17 +599,15 @@ export function bindWatershedPlugin(
       const area = result.response.basin_stats.reduce((sum, basin) => sum + basin.area_km2, 0);
       const areaText = area > 0 ? `（${area.toFixed(1)} km²）` : "";
       setStatus(
-        `流域提取完成：${name}${areaText}；用时 ${formatElapsed(result.response.walls_ms)}`,
+        `流域提取完成：${outlets.map(({ name }) => name).join("、")}${areaText}；用时 ${formatElapsed(result.response.walls_ms)}`,
       );
       for (const [index, draft] of selectedDrafts.entries()) {
         draft.extracted = true;
         draft.selected = false;
-        draft.areaKm2 = result.response.basin_stats.find(({ id }) => id === index + 1)?.area_km2;
+        draft.areaKm2 = basinAreas.get(outlets[index]!.id);
       }
       renderPoints();
       reextract.checked = false;
-      extractionIndex += 1;
-      resultName.value = `流域 ${extractionIndex}`;
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         setStatus(error instanceof Error ? error.message : String(error), true);

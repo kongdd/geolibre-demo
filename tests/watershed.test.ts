@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   draftsFromLayers,
+  formatArea,
   formatElapsed,
   outletsToGeoJSON,
   watershedDeletion,
@@ -14,9 +15,11 @@ import {
   WatershedApiError,
 } from "../plugins/watershed/client";
 
-test("formatElapsed uses readable units", () => {
+test("formats elapsed time and rounded basin area", () => {
   assert.equal(formatElapsed(35), "35 ms");
   assert.equal(formatElapsed(1234), "1.23 s");
+  assert.equal(formatArea(1234.6), "1,235 km²");
+  assert.equal(formatArea(), "— km²");
 });
 
 const emptyCollection = JSON.stringify({ type: "FeatureCollection", features: [] });
@@ -117,6 +120,30 @@ test("outletsToGeoJSON preserves named user assets", () => {
   });
 });
 
+test("defaults unnamed outlets to station IDs", () => {
+  const layer: GeoLibreLayer = {
+    id: "pour-1",
+    name: "legacy",
+    type: "geojson",
+    source: { type: "geojson" },
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [111, 32] },
+          properties: { id: 3 },
+        },
+      ],
+    },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: { watershedRole: "pour-point" },
+  };
+  assert.equal(draftsFromLayers([layer])[0]?.name, "站点3");
+});
+
 test("restores extracted pour points and plans precise deletion", () => {
   const layer: GeoLibreLayer = {
     id: "pour-1",
@@ -140,6 +167,7 @@ test("restores extracted pour points and plans precise deletion", () => {
       watershedName: "流域 1",
       watershedRole: "pour-point",
       pourPointKey: "k1",
+      watershedAreaKm2: 12.6,
     },
   };
   assert.deepEqual(draftsFromLayers([layer]), [
@@ -151,6 +179,7 @@ test("restores extracted pour points and plans precise deletion", () => {
       key: "k1",
       selected: false,
       extracted: true,
+      areaKm2: 12.6,
     },
   ]);
 

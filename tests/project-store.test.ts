@@ -1,5 +1,6 @@
 import {
   applyGroupEffects,
+  buildLayerTree,
   DEFAULT_LAYER_STYLE,
   parseProject,
   serializeProject,
@@ -80,6 +81,32 @@ test("addLayers writes once", () => {
   assert.deepEqual(
     projectStore.getState().project.layers.map((layer) => layer.id),
     ["a", "b"],
+  );
+});
+
+test("addLayers places new group members on top", () => {
+  projectStore.getState().newProject("Top");
+  const groupId = projectStore.getState().addGroup("Basins");
+  const layer = (id: string): GeoLibreLayer => ({
+    id,
+    name: id,
+    type: "geojson",
+    source: { type: "geojson" },
+    visible: true,
+    opacity: 1,
+    style: { ...DEFAULT_LAYER_STYLE },
+    metadata: {},
+    groupId,
+  });
+  projectStore.getState().addLayer(layer("existing"));
+  projectStore.getState().addLayers([layer("new-1"), layer("new-2")]);
+  const project = projectStore.getState().project;
+  assert.deepEqual(project.layers.map(({ id }) => id), ["existing", "new-1", "new-2"]);
+  assert.deepEqual(
+    buildLayerTree(project.layers, project.layerGroups ?? [])
+      .flatMap((item) => (item.kind === "group" ? item.children : [item.layer]))
+      .map(({ id }) => id),
+    ["new-2", "new-1", "existing"],
   );
 });
 

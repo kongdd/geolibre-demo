@@ -15,7 +15,8 @@
     "dev": "vite --configLoader native",
     "build": "tsc --noEmit && vite build --configLoader native",
     "test": "node --import tsx --test tests/*.test.ts",
-    "test:e2e": "xvfb-run -a sh -c 'node --import tsx tests/e2e/pi-agent-e2e.ts && node --import tsx tests/e2e/geometry-e2e.ts && node --import tsx tests/e2e/watershed-e2e.ts'",
+    "test:e2e": "xvfb-run -a sh -c 'node --import tsx tests/e2e/pi-web-e2e.ts && node --import tsx tests/e2e/geometry-e2e.ts && node --import tsx tests/e2e/watershed-e2e.ts && node --import tsx tests/e2e/flash-flood-e2e.ts'",
+    "test:e2e:flash-live": "xvfb-run -a node --import tsx tests/e2e/flash-flood-live-e2e.ts",
     "preview": "vite preview --configLoader native"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { chromium } from "../../../../node_modules/playwright/index.mjs";
+const playwright = process.env.PLAYWRIGHT_PATH ?? "../../../../node_modules/playwright/index.mjs";
+const { chromium } = await import(playwright);
 
 const browser = await chromium.launch({
   headless: false,
@@ -64,6 +65,9 @@ await page.route("**/api/watershed", (route) =>
 await page.goto(process.env.PROJECT_DEMO_URL ?? "http://127.0.0.1:5187/project-demo/", {
   waitUntil: "domcontentloaded",
 });
+// 使用唯一 Project，避免覆盖或删除用户已有的同名 Remote Project。
+await page.fill("#project-name", `watershed-e2e-${process.pid}-${Date.now()}`);
+await page.locator("#project-name").dispatchEvent("change");
 await page.waitForFunction(() => typeof window.__geometryDump === "function");
 await page.click('button[data-tip="流域快速提取"]');
 await page.waitForFunction(() =>
@@ -134,8 +138,9 @@ const stationNames = await page.locator(".watershed-point-row input[aria-label='
 assert.deepEqual(stationNames, ["站点2", "站点1"]);
 await page.locator(".watershed-point-row input[type='checkbox']").first().uncheck();
 await page.click("[data-run]");
+// 示例栅格可能异步更新全局状态栏；以实际 Project 图层作为完成证据。
 await page.waitForFunction(() =>
-  document.querySelector("#status")?.textContent?.includes("流域提取完成"),
+  document.querySelector("#layers")?.textContent?.includes("Pour_站点1"),
 );
 const pointStatus = (await page.locator(".watershed-point-list").textContent()) ?? "";
 assert(pointStatus.includes("12 km²"));

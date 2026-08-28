@@ -1,6 +1,7 @@
 dist
 *lock*
-images
+images/*
+!images/flash-flood-live.png
 public/projects/*.geolibre.json
 public/projects/*/
 
@@ -9,3 +10,4 @@ shp
 
 ## 数据清洗脚本
 *.R
+images

@@ -57,11 +57,11 @@
       </button>
       <span class="grow"></span>
       <button
-        id="toggle-pi-chat"
+        id="toggle-pi-web"
         class="icon-btn"
-        data-tip="打开 Pi Chat"
-        aria-label="打开 Pi Chat"
-        aria-controls="pi-chat"
+        data-tip="打开 Pi Web"
+        aria-label="打开 Pi Web"
+        aria-controls="pi-web"
         aria-expanded="false"
       >
         <img src="icons/chat.svg" alt="" />
@@ -84,30 +84,13 @@
         <div id="legend" hidden></div>
         <div id="geom-bar" class="geom-bar" hidden></div>
       </div>
-      <aside id="pi-chat" aria-label="Pi Chat" hidden>
-        <header class="pi-chat-header">
-          <button id="pi-chat-history-toggle" type="button" aria-label="对话历史" aria-expanded="false">☰</button>
-          <button id="pi-chat-share" type="button" title="共享当前界面给 Pi" aria-label="共享当前界面给 Pi" aria-pressed="false">◉</button>
-          <strong>Pi</strong>
+      <aside id="pi-web" aria-label="Pi Web" hidden>
+        <header class="pi-web-header">
+          <strong>Pi Web</strong>
           <span class="grow"></span>
-          <button id="pi-chat-new" type="button" aria-label="新对话">＋</button>
-          <button id="pi-chat-close" type="button" aria-label="关闭 Pi Chat">×</button>
+          <button id="pi-web-close" type="button" aria-label="关闭 Pi Web">×</button>
         </header>
-        <div class="pi-chat-body">
-          <nav id="pi-chat-history" aria-label="对话历史" hidden></nav>
-          <div id="pi-chat-messages" role="log" aria-live="polite"></div>
-          <form id="pi-chat-form">
-            <div class="pi-chat-composer">
-              <textarea id="pi-chat-input" rows="1" placeholder="询问 Pi" aria-label="消息"></textarea>
-              <button id="pi-chat-send" type="submit" aria-label="发送">↑</button>
-            </div>
-            <div class="pi-chat-options">
-              <select id="pi-chat-model" aria-label="模型" disabled><option>正在连接 Pi…</option></select>
-              <select id="pi-chat-thinking" aria-label="思考级别" disabled><option>Think</option></select>
-              <small>Enter 发送 · Shift+Enter 换行</small>
-            </div>
-          </form>
-        </div>
+        <iframe id="pi-web-frame" title="Pi Web"></iframe>
       </aside>
     </main>
     <footer id="status">Ready</footer>

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
-import { chromium } from "../../../../node_modules/playwright/index.mjs";
+const playwright = process.env.PLAYWRIGHT_PATH ?? "../../../../node_modules/playwright/index.mjs";
+const { chromium } = await import(playwright);
 
 const BASE = "http://127.0.0.1:5187/project-demo/";
 const OUT = new URL("../../images/e2e", import.meta.url).pathname;

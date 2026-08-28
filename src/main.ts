@@ -7,7 +7,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "maplibre-gl-basemap-control/style.css";
 import "maplibre-gl-raster/style.css";
 import { ee } from "@geolibre/plugins/earthengine";
-import { bindPiAgent } from "../plugins/pi-agent";
+import { bindFlashFloodPlugin } from "../plugins/flash-flood";
+import { bindPiWeb } from "../plugins/pi-web";
 import { bindWatershedPlugin } from "../plugins/watershed";
 import { bindBasemaps } from "./basemap";
 import { deleteRasterAsset } from "./assets";
@@ -168,14 +169,29 @@ const watershed = bindWatershedPlugin(map, fitLayer, () => {
   closeGeometryEditor();
   if (!basemaps.getState().collapsed) basemaps.collapse();
 });
-basemaps.on("expand", () => watershed.close());
+let restoreSidebarAfterFlashFlood = false;
+const flashFlood = bindFlashFloodPlugin(map, () => {
+  closeIdentify();
+  closeGeometryEditor();
+  watershed.close();
+  if (!basemaps.getState().collapsed) basemaps.collapse();
+  restoreSidebarAfterFlashFlood = sidebar.hasAttribute("hidden");
+  if (sidebar.hidden) sidebarToggle.click();
+}, () => map.resize(), () => {
+  if (restoreSidebarAfterFlashFlood && !sidebar.hidden) sidebarToggle.click();
+  restoreSidebarAfterFlashFlood = false;
+});
+basemaps.on("expand", () => {
+  watershed.close();
+  flashFlood.close();
+});
 const layerActions = { fitLayer, removeLayer };
 bindStyleEditor(styleEditor, layerActions);
 bindLegend(element<HTMLElement>("legend"));
 bindLayerTree(layersPanel, layerActions);
 bindGeometryEditor(map, element("geom-bar"));
 bindIdentify(map, element("identify"), rasterAdapter);
-bindPiAgent(() => {
+bindPiWeb(() => {
   if (mapReady) map.resize();
   else map.once("load", () => map.resize());
 });
@@ -199,6 +215,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (isContextMenuOpen()) return closeContextMenu();
   if (watershed.cancel()) return;
+  if (flashFlood.close()) return;
   const ramp = document.querySelector<HTMLElement>(".ramp-list:not([hidden])");
   if (ramp) {
     ramp.hidden = true;

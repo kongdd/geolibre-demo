@@ -6,6 +6,7 @@ const HYDRO_BOUNDS: [number, number, number, number] = [105.6292, 28.8275, 116.7
 const SAMPLE = {
   flowDirection: `${import.meta.env.BASE_URL}data/hubei-flow-direction.cog.tif`,
   flowAccumulation: `${import.meta.env.BASE_URL}data/hubei-flow-accumulation.cog.tif`,
+  urbanRatio: `${import.meta.env.BASE_URL}data/hubei_UrbanRatio_D240_2018.tif`,
   shiyanBoundary: `${import.meta.env.BASE_URL}data/shp/poly_十堰市界.shp`,
   countries: `${import.meta.env.BASE_URL}data/ne_110m_admin_0_countries.geojson`,
   rivers: `${import.meta.env.BASE_URL}data/ne_110m_rivers_lake_centerlines.geojson`,
@@ -46,6 +47,11 @@ export async function loadDemoLayers(): Promise<string> {
 
   layers.push(
     flowAccumulation,
+    hydro.addLayer(
+      SAMPLE.urbanRatio,
+      { min: 0.4, max: 1, colormap: "reds", opacity: 0.6 },
+      "湖北城镇比例（2018）",
+    ),
     hydro.addLayer(
       SAMPLE.flowDirection,
       { min: 1, max: 128, colormap: "viridis", opacity: 0.55 },

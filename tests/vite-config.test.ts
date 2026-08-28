@@ -8,13 +8,14 @@ test("production build preserves Earth Engine method parameters", () => {
   assert.equal(config.esbuild && config.esbuild.minifyIdentifiers, false);
 });
 
-test("only the watershed endpoint is proxied to SpatialHydro", () => {
-  const proxy = config.server?.proxy?.["/project-demo/api/watershed"];
-  assert.equal(typeof proxy === "object" && proxy.target, "http://127.0.0.1:8765");
-  assert.equal(
-    typeof proxy === "object" && proxy.rewrite?.("/project-demo/api/watershed"),
-    "/api/watershed",
-  );
-  assert.equal(config.preview?.proxy?.["/project-demo/api/watershed"], proxy);
+test("only explicit SpatialHydro endpoints are proxied", () => {
+  const routes = ["watershed", "model", "basins", "health"];
+  for (const route of routes) {
+    const path = `/project-demo/api/${route}`;
+    const proxy = config.server?.proxy?.[path];
+    assert.equal(typeof proxy === "object" && proxy.target, "http://127.0.0.1:8765");
+    assert.equal(typeof proxy === "object" && proxy.rewrite?.(path), `/api/${route}`);
+    assert.equal(config.preview?.proxy?.[path], proxy);
+  }
   assert.equal(config.server?.proxy?.["/project-demo/api/projects"], undefined);
 });
